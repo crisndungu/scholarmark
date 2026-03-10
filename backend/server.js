@@ -61,13 +61,25 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://js.paystack.co", "'unsafe-inline'"],
+      // 'unsafe-eval' is required by Paystack's inline.js which uses eval() internally
+      scriptSrc: [
+        "'self'",
+        "https://js.paystack.co",
+        "https://checkout.paystack.com",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+      ],
       scriptSrcAttr: ["'unsafe-inline'"],  // allow inline onclick/onkeydown handlers
       styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      connectSrc: ["'self'", "https://api.paystack.co", "https://checkout.paystack.com"],
+      connectSrc: [
+        "'self'",
+        "https://api.paystack.co",
+        "https://checkout.paystack.com",
+        "https://scholarmark.onrender.com",
+      ],
       frameSrc: ["https://checkout.paystack.com"],
-      imgSrc: ["'self'", "data:"],
+      imgSrc: ["'self'", "data:", "https://checkout.paystack.com"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null,
     },
@@ -75,14 +87,14 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// CORS — only allow your own frontend
-// AFTER
+// ─── CORS — only allow your own frontend ──────────────────────────
 const allowedOrigins = [
   "https://scholarmark.vercel.app",
   process.env.FRONTEND_URL,
   "http://localhost:3000",
   "http://127.0.0.1:3000",
 ].filter(Boolean);
+
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
