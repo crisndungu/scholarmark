@@ -97,11 +97,17 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    // ✅ Allow null origin (file://, Postman, curl)
+    // ✅ Allow your listed origins
+    if (!origin || allowedOrigins.includes(origin)) {
+      return cb(null, true);
+    }
+    console.log(`[CORS BLOCKED] ${origin}`); // Debug log
     cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
 }));
+
 
 // ─── RATE LIMITERS ────────────────────────────────────────────────
 
