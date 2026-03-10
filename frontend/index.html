@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ScholarMark — Expert Academic Review for Dissertations & Research Papers</title>
+  <meta name="description"
+    content="Submit your dissertation, thesis, or research paper for a detailed expert review. Structured improvement feedback for Level 7–10 academic work. Pricing in your local currency." />
+  <meta name="keywords"
+    content="academic review, dissertation feedback, thesis review, PhD review, Level 7 review, Level 8 doctoral review, academic improvement, research paper feedback" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://www.scholarmark.co.ke/" />
+
+  <!-- Open Graph -->
+  <meta property="og:title" content="ScholarMark — Expert Academic Review" />
+  <meta property="og:description"
+    content="Submit your dissertation or thesis. Receive a detailed written review with structured improvement guidance." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://www.scholarmark.co.ke/" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Schema.org -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ProfessionalService",
+    "name": "ScholarMark Academic Review",
+    "description": "Expert written review for dissertations, theses, and research papers at Level 7 to Level 10.",
+    "url": "https://www.scholarmark.co.ke",
+    "areaServed": ["Kenya","United Kingdom","United States","International"],
+    "priceRange": "£7–£25 / $10–$36",
+    "offers": [
+      {"@type":"Offer","name":"Master's Review (Level 7)","priceCurrency":"GBP","price":"7"},
+      {"@type":"Offer","name":"Doctoral Review (Level 8)","priceCurrency":"GBP","price":"12"},
+      {"@type":"Offer","name":"Post-Doctoral Review (Level 9)","priceCurrency":"GBP","price":"18"},
+      {"@type":"Offer","name":"Expert Review (Level 10)","priceCurrency":"GBP","price":"25"}
+    ]
+  }
+  </script>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap"
+    rel="stylesheet" />
+
+  <!-- Our CSS -->
+  <link rel="stylesheet" href="/css/styles.css" />
+
+  <!-- Paystack (loaded here so it's ready before JS runs) -->
+  <script src="https://js.paystack.co/v1/inline.js"></script>
+</head>
+
+<body>
+
+  <!-- ══════════════════════════════════════════════════
+     NAVIGATION
+══════════════════════════════════════════════════ -->
+  <header>
+    <nav id="nav" role="navigation" aria-label="Main navigation">
+      <div class="nav-logo">
+        <div class="nav-logo-mark" aria-hidden="true">SM</div>
+        Scholar<em>Mark</em>
+      </div>
+      <div class="nav-links">
+        <a href="#how">How It Works</a>
+        <a href="#services">Services</a>
+        <a href="#testimonials">Reviews</a>
+        <a href="#faq">FAQ</a>
+        <button class="nav-btn" onclick="document.getElementById('submit').scrollIntoView({behavior:'smooth'})"
+          aria-label="Go to submission form">
+          Submit Work
+        </button>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ══════════════════════════════════════════════════
+     HERO
+══════════════════════════════════════════════════ -->
+    <section id="hero" aria-label="Hero">
+      <div class="hero-geo" aria-hidden="true"></div>
+      <div class="hero-lines" aria-hidden="true"></div>
+
+      <div class="hero-inner">
+        <!-- Left: text -->
+        <div class="hero-text">
+          <div class="hero-badge">
+            <div class="badge-dot" aria-hidden="true"></div>
+            Academic Review — Level 7 to Level 10
+          </div>
+
+          <h1 class="hero-h1">
+            Your research,<br />
+            reviewed with<br />
+            <em>real precision</em>
+          </h1>
+
+          <p class="hero-p">
+            Submit your dissertation, thesis, or research paper — alongside your marking guidelines.
+            Receive a structured written review calibrated to your academic level, with a full
+            improvement plan, in minutes.
+          </p>
+
+          <div class="hero-ctas">
+            <button class="cta-p" onclick="document.getElementById('submit').scrollIntoView({behavior:'smooth'})">
+              Submit Your Work
+            </button>
+            <button class="cta-o" onclick="document.getElementById('how').scrollIntoView({behavior:'smooth'})">
+              How It Works
+            </button>
+          </div>
+        </div>
+
+        <!-- Right: preview card -->
+        <div class="hero-card" aria-hidden="true">
+          <div class="hc-header">
+            <div class="hc-dots">
+              <div class="hc-dot" style="background:#ff6059"></div>
+              <div class="hc-dot" style="background:#ffbd2e"></div>
+              <div class="hc-dot" style="background:#27c840"></div>
+            </div>
+            <div class="hc-lbl">Review Report</div>
+          </div>
+          <div class="hc-body">
+            <div class="hc-lvl">Level 8 — Doctoral · PhD Dissertation</div>
+            <div class="hc-doc">
+              <div class="hc-doc-icon">📕</div>
+              <div>
+                <div class="hc-doc-name">Chapter_3_Methodology.pdf</div>
+                <div class="hc-doc-size">248 KB · Main document</div>
+              </div>
+            </div>
+            <div class="hc-doc">
+              <div class="hc-doc-icon">📋</div>
+              <div>
+                <div class="hc-doc-name">Assessment_Guidelines.pdf</div>
+                <div class="hc-doc-size">84 KB · Guidelines</div>
+              </div>
+            </div>
+            <div class="hc-scores">
+              <div class="hc-score">
+                <div class="hc-score-n">78</div>
+                <div class="hc-score-l">Score</div>
+              </div>
+              <div class="hc-score">
+                <div class="hc-score-n" style="font-size:1rem;margin-top:5px">Merit</div>
+                <div class="hc-score-l">Grade</div>
+              </div>
+              <div class="hc-score">
+                <div class="hc-score-n" style="font-size:0.75rem;margin-top:7px;line-height:1.2">Minor Rev.</div>
+                <div class="hc-score-l">Status</div>
+              </div>
+            </div>
+            <div class="hc-bars">
+              <div class="hc-bar">
+                <div class="hc-bar-lbl">Methodology</div>
+                <div class="hc-bar-bg">
+                  <div class="hc-bar-f" style="width:82%"></div>
+                </div>
+                <div class="hc-bar-v">82</div>
+              </div>
+              <div class="hc-bar">
+                <div class="hc-bar-lbl">Lit. Review</div>
+                <div class="hc-bar-bg">
+                  <div class="hc-bar-f" style="width:75%"></div>
+                </div>
+                <div class="hc-bar-v">75</div>
+              </div>
+              <div class="hc-bar">
+                <div class="hc-bar-lbl">Argument</div>
+                <div class="hc-bar-bg">
+                  <div class="hc-bar-f" style="width:79%"></div>
+                </div>
+                <div class="hc-bar-v">79</div>
+              </div>
+              <div class="hc-bar">
+                <div class="hc-bar-lbl">Originality</div>
+                <div class="hc-bar-bg">
+                  <div class="hc-bar-f" style="width:68%"></div>
+                </div>
+                <div class="hc-bar-v">68</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Stats strip -->
+      <div class="hero-stats" role="list" aria-label="Key statistics">
+        <div class="hstat" role="listitem">
+          <div class="hstat-num" data-count="4800" data-sfx="">0</div>
+          <div class="hstat-lbl">Documents Reviewed</div>
+        </div>
+        <div class="hstat" role="listitem">
+          <div class="hstat-num" data-count="98" data-sfx="%">0%</div>
+          <div class="hstat-lbl">Satisfaction Rate</div>
+        </div>
+        <div class="hstat" role="listitem">
+          <div class="hstat-num">≤90s</div>
+          <div class="hstat-lbl">Average Turnaround</div>
+        </div>
+        <div class="hstat" role="listitem">
+          <div class="hstat-num">10</div>
+          <div class="hstat-lbl">Files Per Submission</div>
+        </div>
+      </div>
+
+      <div class="hero-wedge" aria-hidden="true"></div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+     MARQUEE
+══════════════════════════════════════════════════ -->
+    <div class="strip" aria-hidden="true" role="presentation">
+      <div class="strip-track" id="stripTrack"></div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════
+     HOW IT WORKS
+══════════════════════════════════════════════════ -->
+    <section id="how" class="section" aria-labelledby="how-h">
+      <div class="section-inner">
+        <div class="how-head">
+          <div>
+            <div class="section-eyebrow reveal">Process</div>
+            <h2 id="how-h" class="section-h reveal">From submission<br />to <em>clarity</em></h2>
+          </div>
+          <p class="reveal">
+            ScholarMark gives every scholar access to structured, examiner-level feedback — without the wait.
+            Upload your documents, pay once, and receive a comprehensive written report you can act on immediately.
+          </p>
+        </div>
+
+        <div class="how-steps">
+          <div class="how-step reveal">
+            <span class="step-n">Step 01</span>
+            <div class="step-icon" aria-hidden="true">📤</div>
+            <h3 class="step-h">Upload your documents</h3>
+            <p class="step-p">Submit up to ten files — your main document plus any supporting materials: marking
+              rubrics, guidelines, previous feedback, or supplementary chapters. PDF, Word, and plain text accepted.</p>
+          </div>
+          <div class="how-step reveal">
+            <span class="step-n">Step 02</span>
+            <div class="step-icon" aria-hidden="true">🔒</div>
+            <h3 class="step-h">Secure one-time payment</h3>
+            <p class="step-p">Pay a flat fee via Paystack. Pricing is automatically shown in your local currency. No
+              subscription, no recurring charges. Your review begins the moment payment is confirmed.</p>
+          </div>
+          <div class="how-step reveal">
+            <span class="step-n">Step 03</span>
+            <div class="step-icon" aria-hidden="true">📋</div>
+            <h3 class="step-h">Download your report</h3>
+            <p class="step-p">Receive a full written review: criteria scores, specific feedback, a prioritised
+              improvement plan, resource recommendations, and a final examiner commentary. Available instantly as a PDF.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+     SERVICES / PRICING
+══════════════════════════════════════════════════ -->
+    <section id="services" class="section" aria-labelledby="svc-h">
+      <div class="section-inner">
+        <div class="services-head">
+          <div class="section-eyebrow reveal">Services &amp; Pricing</div>
+          <h2 id="svc-h" class="section-h reveal">Calibrated to your<br /><em>level of scholarship</em></h2>
+          <p class="reveal"
+            style="color:rgba(185,214,242,0.45);font-size:0.9rem;margin-top:14px;font-family:var(--mono);font-size:0.7rem;letter-spacing:0.06em">
+            Prices shown in your local currency — detected automatically from your location
+          </p>
+        </div>
+
+        <div class="svc-table reveal">
+          <!-- Level 7 -->
+          <div class="svc-row" onclick="setLevel('Level 7')" role="button" tabindex="0"
+            aria-label="Select Level 7 Master's review" onkeydown="if(event.key==='Enter')setLevel('Level 7')">
+            <div class="svc-tag">L–07</div>
+            <div>
+              <div class="svc-name">Master's Review</div>
+              <div class="svc-sub">Postgraduate Taught Programmes</div>
+            </div>
+            <div class="svc-pills">
+              <span class="svc-pill">Critical Analysis</span>
+              <span class="svc-pill">Research Methodology</span>
+              <span class="svc-pill">Theoretical Frameworks</span>
+              <span class="svc-pill">Academic Writing</span>
+              <span class="svc-pill">Argument Coherence</span>
+            </div>
+            <div class="svc-right">
+              <div class="svc-price" data-price-level="Level 7">£7.00 <small>/ review</small></div>
+              <span class="svc-arrow" aria-hidden="true">Submit →</span>
+            </div>
+          </div>
+
+          <!-- Level 8 -->
+          <div class="svc-row" onclick="setLevel('Level 8')" role="button" tabindex="0"
+            aria-label="Select Level 8 Doctoral review" onkeydown="if(event.key==='Enter')setLevel('Level 8')">
+            <div class="svc-tag">L–08</div>
+            <div>
+              <div class="svc-name">Doctoral Review</div>
+              <div class="svc-sub">PhD &amp; Professional Doctorate</div>
+            </div>
+            <div class="svc-pills">
+              <span class="svc-pill">Original Contribution</span>
+              <span class="svc-pill">Research Design Rigour</span>
+              <span class="svc-pill">Literature Synthesis</span>
+              <span class="svc-pill">Theoretical Innovation</span>
+              <span class="svc-pill">Scholarly Impact</span>
+            </div>
+            <div class="svc-right">
+              <div class="svc-price" data-price-level="Level 8">£12.00 <small>/ review</small></div>
+              <span class="svc-arrow" aria-hidden="true">Submit →</span>
+            </div>
+          </div>
+
+          <!-- Level 9 -->
+          <div class="svc-row" onclick="setLevel('Level 9')" role="button" tabindex="0"
+            aria-label="Select Level 9 Post-Doctoral review" onkeydown="if(event.key==='Enter')setLevel('Level 9')">
+            <div class="svc-tag">L–09</div>
+            <div>
+              <div class="svc-name">Post-Doctoral Review</div>
+              <div class="svc-sub">Advanced Research &amp; Fellowship</div>
+            </div>
+            <div class="svc-pills">
+              <span class="svc-pill">Field-Leading Insight</span>
+              <span class="svc-pill">Interdisciplinary Synthesis</span>
+              <span class="svc-pill">Publication Readiness</span>
+              <span class="svc-pill">Grant Narrative</span>
+              <span class="svc-pill">Methodological Mastery</span>
+            </div>
+            <div class="svc-right">
+              <div class="svc-price" data-price-level="Level 9">£18.00 <small>/ review</small></div>
+              <span class="svc-arrow" aria-hidden="true">Submit →</span>
+            </div>
+          </div>
+
+          <!-- Level 10 -->
+          <div class="svc-row" onclick="setLevel('Level 10')" role="button" tabindex="0"
+            aria-label="Select Level 10 Expert review" onkeydown="if(event.key==='Enter')setLevel('Level 10')">
+            <div class="svc-tag">L–10</div>
+            <div>
+              <div class="svc-name">Expert / Professorial Review</div>
+              <div class="svc-sub">Expert Practice &amp; Professorial Research</div>
+            </div>
+            <div class="svc-pills">
+              <span class="svc-pill">Paradigm Contribution</span>
+              <span class="svc-pill">Global Scholarly Relevance</span>
+              <span class="svc-pill">Policy Implications</span>
+              <span class="svc-pill">Pedagogical Value</span>
+              <span class="svc-pill">Legacy Impact</span>
+            </div>
+            <div class="svc-right">
+              <div class="svc-price" data-price-level="Level 10">£25.00 <small>/ review</small></div>
+              <span class="svc-arrow" aria-hidden="true">Submit →</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+     SUBMIT
+══════════════════════════════════════════════════ -->
+    <section id="submit" class="section" aria-labelledby="submit-h">
+      <div class="section-inner">
+        <div class="submit-wrap">
+
+          <!-- Left: trust copy -->
+          <div class="submit-left">
+            <div class="section-eyebrow reveal">Submit Your Work</div>
+            <h2 id="submit-h" class="section-h reveal">Ready for<br /><em>honest feedback?</em></h2>
+            <p class="reveal">
+              Upload your documents — your main work plus any additional files such as marking
+              guidelines, rubrics, or assessment briefs. We review everything together to give you
+              the most accurate, contextual feedback possible.
+            </p>
+            <ul class="trust-list" aria-label="Service guarantees">
+              <li class="trust-item reveal">
+                <div class="ti-check" aria-hidden="true">✓</div>
+                <span>Upload up to <strong>10 files</strong> per submission — including your main document, guidelines,
+                  rubrics, and supplementary materials.</span>
+              </li>
+              <li class="trust-item reveal">
+                <div class="ti-check" aria-hidden="true">✓</div>
+                <span>Your documents are processed in a secure, private environment and <strong>permanently
+                    deleted</strong> after your report is generated.</span>
+              </li>
+              <li class="trust-item reveal">
+                <div class="ti-check" aria-hidden="true">✓</div>
+                <span>Feedback is structured around the <strong>specific criteria</strong> examiners use at each
+                  academic level — not generic commentary.</span>
+              </li>
+              <li class="trust-item reveal">
+                <div class="ti-check" aria-hidden="true">✓</div>
+                <span><strong>Price shown in your local currency.</strong> One payment, no subscription. Instant report
+                  on confirmation.</span>
+              </li>
+              <li class="trust-item reveal">
+                <div class="ti-check" aria-hidden="true">✓</div>
+                <span><strong>Server-side payment verification.</strong> All transactions verified directly with
+                  Paystack — never trusting the browser.</span>
+              </li>
+            </ul>
+          </div>
+
+          <!-- Right: widget -->
+          <div class="widget reveal" id="widget" role="region" aria-labelledby="widgetTitle">
+            <div class="widget-top">
+              <h3 id="widgetTitle">Begin Your Submission</h3>
+              <div class="wdots" aria-hidden="true">
+                <div class="wdot active" id="wd0"></div>
+                <div class="wdot" id="wd1"></div>
+                <div class="wdot" id="wd2"></div>
+                <div class="wdot" id="wd3"></div>
+              </div>
+            </div>
+            <div class="widget-body" id="widgetBody">
+              <!-- Rendered by app.js -->
+              <div
+                style="text-align:center;padding:32px;color:var(--muted);font-family:var(--mono);font-size:0.72rem;letter-spacing:0.1em">
+                Loading…
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+     TESTIMONIALS
+══════════════════════════════════════════════════ -->
+    <section id="testimonials" class="section" aria-labelledby="test-h">
+      <div class="section-inner">
+        <div class="section-eyebrow reveal">Testimonials</div>
+        <h2 id="test-h" class="section-h reveal" style="margin-bottom:38px">What our clients<br /><em>tell us</em></h2>
+        <div class="test-grid">
+
+          <article class="test-card reveal">
+            <div class="tc-stars" aria-label="5 stars">★★★★★</div>
+            <blockquote class="tc-quote">
+              "The written feedback on my PhD proposal was more specific and structured than anything I had received
+              from my supervisor over three months. The improvement plan was directly actionable."
+            </blockquote>
+            <div class="tc-rule" aria-hidden="true"></div>
+            <div class="tc-name">Dr. Amina Osei</div>
+            <div class="tc-role">PhD Candidate — University of Nairobi</div>
+          </article>
+
+          <article class="test-card reveal">
+            <div class="tc-stars" aria-label="5 stars">★★★★★</div>
+            <blockquote class="tc-quote">
+              "I uploaded my dissertation chapter alongside my marking rubric. The review addressed every criterion on
+              the rubric in detail. I revised and passed with a distinction."
+            </blockquote>
+            <div class="tc-rule" aria-hidden="true"></div>
+            <div class="tc-name">Samuel Mensah</div>
+            <div class="tc-role">MSc Economics — Strathmore University</div>
+          </article>
+
+          <article class="test-card reveal">
+            <div class="tc-stars" aria-label="5 stars">★★★★★</div>
+            <blockquote class="tc-quote">
+              "For post-doctoral work the depth surprised me. The review identified methodological nuances I had
+              overlooked and gave concrete guidance on publication positioning."
+            </blockquote>
+            <div class="tc-rule" aria-hidden="true"></div>
+            <div class="tc-name">Dr. Fatima Al-Hassan</div>
+            <div class="tc-role">Post-Doctoral Researcher — UCT</div>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- ══════════════════════════════════════════════════
+     FAQ
+══════════════════════════════════════════════════ -->
+    <section id="faq" class="section" aria-labelledby="faq-h">
+      <div class="section-inner">
+        <div class="section-eyebrow reveal">FAQ</div>
+        <h2 id="faq-h" class="section-h reveal faq-max" style="margin-bottom:44px">Frequently
+          asked<br /><em>questions</em></h2>
+
+        <div class="faq-max">
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">Can I upload multiple documents — including marking
+                guidelines?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Yes. You can upload up to 10 files per submission. We encourage you to include your
+                marking rubric, assessment guidelines, previous feedback, and any supplementary chapters alongside your
+                main document. Our reviewer reads all uploaded materials to provide the most contextual and accurate
+                feedback possible.</span>
+            </div>
+          </div>
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">How is my price determined and what currency will I be charged
+                in?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Your currency is automatically detected from your location when you visit the site.
+                A UK visitor pays in GBP (£7–£25), a US visitor in USD ($10–$36), a Kenyan visitor in KES, and so on.
+                Exchange rates are applied in real time. The price you see is always the authoritative price set on our
+                server — we never trust prices submitted from the browser.</span>
+            </div>
+          </div>
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">Is my work kept confidential?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Completely. All uploaded documents are held in memory only — they are never written
+                to disk. They are permanently cleared from our servers immediately after your review report is
+                generated. We never store, share, or use your work for any other purpose.</span>
+            </div>
+          </div>
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">How is payment verified? Is it secure?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Yes — payment is verified entirely server-side. When Paystack reports a successful
+                transaction, our backend independently verifies it directly with the Paystack API using your secret key
+                (which never touches the browser). We also verify that the amount paid matches the expected price,
+                preventing any tampering. We additionally listen to Paystack webhooks, verified with HMAC-SHA512
+                signatures, as a secondary layer of confirmation.</span>
+            </div>
+          </div>
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">How quickly will I receive my report?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Most reviews are completed within 60 to 90 seconds of payment confirmation. There
+                are no queues and no waiting. Your report is available for on-screen review and PDF download immediately
+                upon completion.</span>
+            </div>
+          </div>
+
+          <div class="faq-item reveal" itemscope itemprop="mainEntity" itemtype="https://schema.org/Question">
+            <div class="faq-q" tabindex="0" role="button" aria-expanded="false">
+              <span class="faq-q-t" itemprop="name">What payment methods are accepted?</span>
+              <div class="faq-ic" aria-hidden="true">+</div>
+            </div>
+            <div class="faq-a" itemprop="acceptedAnswer" itemscope itemtype="https://schema.org/Answer">
+              <span itemprop="text">Payments are processed via Paystack, which supports M-Pesa, Visa, Mastercard, bank
+                transfer, USSD, and mobile money depending on your country. There is a single one-time charge per
+                submission — no subscription and no recurring fees.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════════════
+     FOOTER
+══════════════════════════════════════════════════ -->
+  <footer>
+    <div class="footer-top">
+      <div>
+        <span class="ft-logo">Scholar<em>Mark</em></span>
+        <p class="ft-desc">Expert academic review and structured improvement feedback for dissertations, theses, and
+          research papers at Master's to professorial level. Global service, local pricing.</p>
+      </div>
+      <div class="ft-col">
+        <h5>Services</h5>
+        <a href="#services">Master's Review (L7)</a>
+        <a href="#services">Doctoral Review (L8)</a>
+        <a href="#services">Post-Doctoral (L9)</a>
+        <a href="#services">Expert Review (L10)</a>
+      </div>
+      <div class="ft-col">
+        <h5>Company</h5>
+        <a href="#how">How It Works</a>
+        <a href="#testimonials">Testimonials</a>
+        <a href="#faq">FAQ</a>
+        <a href="#">About Us</a>
+      </div>
+      <div class="ft-col">
+        <h5>Legal</h5>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+        <a href="#">Confidentiality</a>
+        <a href="#">Contact Us</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span class="fb-copy">© 2025 ScholarMark Academic Review. All rights reserved.</span>
+      <span class="fb-copy">Nairobi, Kenya · International Service</span>
+    </div>
+  </footer>
+
+  <!-- Our JS (deferred, runs after DOM) -->
+  <script src="/js/app.js" defer></script>
+
+</body>
+
+</html>

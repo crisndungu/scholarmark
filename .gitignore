@@ -1,0 +1,20 @@
+# Environment — NEVER commit this
+.env
+
+# Database — contains real user data
+data/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
