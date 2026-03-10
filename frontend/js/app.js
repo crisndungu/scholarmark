@@ -22,9 +22,6 @@ const S = {
   progress: 0,
 };
 
-const API_BASE = window.location.hostname === 'localhost'
-  ? 'http://localhost:3000'
-  : 'https://scholarmark.onrender.com';
 
 const MAX_FILES = 10;
 
