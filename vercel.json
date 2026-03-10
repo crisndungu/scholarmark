@@ -1,11 +1,13 @@
 {
+    "buildCommand": "npm ci && npm run build",
+    "outputDirectory": "dist",
+    "devCommand": "npm run dev",
+    "framework": "vite",
+    "installCommand": "npm ci",
     "rewrites": [
         {
             "source": "/(.*)",
             "destination": "/index.html"
         }
-    ],
-    "buildCommand": "npm run build",
-    "outputDirectory": "dist",
-    "framework": "vite"
+    ]
 }

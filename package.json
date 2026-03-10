@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
+    "dev:frontend": "vite",
+    "dev:backend": "nodemon backend/server.js",
     "build": "vite build",
     "preview": "vite preview"
   },
