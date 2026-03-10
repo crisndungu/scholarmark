@@ -31,6 +31,136 @@ const LEVEL_DATA = {
   "Level 10": { short: "Expert", sub: "Expert & Professorial Practice", criteria: ["Paradigm Contribution", "Global Scholarly Relevance", "Policy Implications", "Pedagogical Value", "Legacy Impact"] },
 };
 
+// ─── VALIDATION HELPERS ───────────────────────────────────────────
+
+/**
+ * Validate a real name:
+ * - At least 2 characters
+ * - Only letters, spaces, hyphens, apostrophes (for names like O'Brien, Anne-Marie)
+ * - No digits, no special symbols
+ * - If it looks like a student ID (contains digits), allow it — but must be at least 4 chars
+ */
+function validateName(raw) {
+  const val = raw.trim();
+  if (val.length < 2) return "Please enter your full name or student ID.";
+
+  // If it's a student ID (contains digits), just check minimum length
+  if (/\d/.test(val)) {
+    if (val.length < 4) return "Student ID must be at least 4 characters.";
+    return null; // valid student ID
+  }
+
+  // It's a name — only allow letters, spaces, hyphens, apostrophes, dots (for initials)
+  if (!/^[a-zA-ZÀ-ÿ'\-\. ]+$/.test(val)) {
+    return "Name should only contain letters, hyphens, and apostrophes. No numbers or special characters.";
+  }
+
+  // Must have at least 2 characters that are letters
+  if ((val.match(/[a-zA-ZÀ-ÿ]/g) || []).length < 2) {
+    return "Please enter a valid name.";
+  }
+
+  return null; // valid
+}
+
+/**
+ * Validate email address properly:
+ * - Must have exactly one @
+ * - Local part (before @) must be non-empty
+ * - Domain must have at least one dot with characters on both sides
+ * - Recognises all real email providers (gmail, yahoo, hotmail, outlook, icloud, etc.)
+ * - No spaces allowed
+ * - Common typo detection (gmial, yaho, etc.)
+ */
+function validateEmail(raw) {
+  const val = raw.trim().toLowerCase();
+
+  if (!val) return "Please enter your email address.";
+  if (val.includes(" ")) return "Email address cannot contain spaces.";
+  if ((val.match(/@/g) || []).length !== 1) return "Please enter a valid email address (e.g. name@gmail.com).";
+
+  const [local, domain] = val.split("@");
+
+  if (!local || local.length < 1) return "Please enter a valid email address.";
+  if (local.length > 64) return "Email address is too long.";
+
+  // Local part: letters, digits, dots, hyphens, underscores, plus signs only
+  if (!/^[a-z0-9._%+\-]+$/.test(local)) {
+    return "The part before @ contains invalid characters.";
+  }
+  // Local part cannot start or end with a dot
+  if (local.startsWith(".") || local.endsWith(".")) {
+    return "Email address cannot start or end with a dot before the @.";
+  }
+
+  if (!domain) return "Please include the domain (e.g. @gmail.com).";
+
+  // Domain must contain at least one dot
+  if (!domain.includes(".")) return "Email domain looks incomplete — did you mean @gmail.com or @yahoo.com?";
+
+  const domainParts = domain.split(".");
+  if (domainParts.some(p => p.length === 0)) return "Please enter a valid email domain.";
+
+  // Top-level domain must be 2–10 chars
+  const tld = domainParts[domainParts.length - 1];
+  if (tld.length < 2 || tld.length > 10) return "The email domain ending looks incorrect (e.g. .com, .co.ke, .ac.uk).";
+
+  // Domain only letters, digits, hyphens
+  if (!/^[a-z0-9.\-]+$/.test(domain)) return "Email domain contains invalid characters.";
+
+  // Common typo detection
+  const typos = {
+    "gmial.com": "gmail.com",
+    "gmai.com": "gmail.com",
+    "gamil.com": "gmail.com",
+    "gmail.co": "gmail.com",
+    "gmail.cm": "gmail.com",
+    "yaho.com": "yahoo.com",
+    "yahooo.com": "yahoo.com",
+    "yahoo.co": "yahoo.com",
+    "hotmial.com": "hotmail.com",
+    "hotmail.co": "hotmail.com",
+    "outlok.com": "outlook.com",
+    "outllok.com": "outlook.com",
+  };
+  if (typos[domain]) {
+    return `Did you mean @${typos[domain]}? Please check your email address.`;
+  }
+
+  return null; // valid
+}
+
+// ─── INLINE FIELD ERROR DISPLAY ──────────────────────────────────
+function setFieldError(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+
+  // Remove existing error
+  clearFieldError(inputId);
+
+  if (message) {
+    input.style.borderColor = "#ef4444";
+    input.style.boxShadow = "0 0 0 3px rgba(239,68,68,0.1)";
+    const errEl = document.createElement("div");
+    errEl.className = "field-err";
+    errEl.id = inputId + "_err";
+    errEl.textContent = message;
+    errEl.style.cssText = "font-size:0.72rem;color:#b91c1c;margin-top:5px;font-family:var(--sans);display:flex;align-items:center;gap:4px;";
+    errEl.innerHTML = `<span style="font-size:0.8rem">⚠</span> ${message}`;
+    input.parentElement.appendChild(errEl);
+  } else {
+    input.style.borderColor = "#22c55e";
+    input.style.boxShadow = "0 0 0 3px rgba(34,197,94,0.1)";
+  }
+}
+
+function clearFieldError(inputId) {
+  const input = document.getElementById(inputId);
+  const errEl = document.getElementById(inputId + "_err");
+  if (input) { input.style.borderColor = ""; input.style.boxShadow = ""; }
+  if (errEl) errEl.remove();
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   // Set fallback prices immediately so the widget renders right away
@@ -46,14 +176,16 @@ document.addEventListener("DOMContentLoaded", () => {
   setupMarquee();
   setupCounters();
   setupReveal();
+  setupHeroParticles();   // ← floating particles canvas
+  setupHeroCardFloat();   // ← card float + bar fill animations
+  setupHeroCursor();      // ← cursor-tracking glow
 
-  // Render the widget immediately — never show "Loading…" to the user
+  // Render the widget immediately
   renderWidget();
 
-  // Load location/pricing and Paystack key in the background; update UI when ready
+  // Load location/pricing and Paystack key in background
   loadLocationAndPricing().then(() => {
     updatePricingUI();
-    // Re-render widget only if still on the upload step so prices update
     if (S.step === "upload") renderWidget();
   });
   loadPaystackKey();
@@ -93,12 +225,10 @@ async function loadLocationAndPricing() {
 }
 
 function updatePricingUI() {
-  // Update service table prices
   document.querySelectorAll("[data-price-level]").forEach(el => {
     const level = el.dataset.priceLevel;
     if (S.prices[level]) el.textContent = S.prices[level].formatted;
   });
-  // Update level options in widget
   document.querySelectorAll(".lo-p").forEach(el => {
     const level = el.closest("[data-level]")?.dataset.level;
     if (level && S.prices[level]) el.textContent = S.prices[level].formatted;
@@ -162,9 +292,15 @@ function renderUpload() {
   return `
 <div class="err-box" id="errBox"></div>
 <div class="f">
-  <label for="nameIn">Your Name or Student ID</label>
-  <input id="nameIn" type="text" placeholder="e.g. Jane Mwangi · STU-2024-001"
-    value="${esc(S.name)}" autocomplete="name" maxlength="200" />
+  <label for="nameIn">Your Full Name or Student ID</label>
+  <input id="nameIn" type="text"
+    placeholder="e.g. Jane Mwangi  or  STU-2024-001"
+    value="${esc(S.name)}"
+    autocomplete="name"
+    maxlength="200"
+    oninput="liveValidateName(this)"
+    onblur="liveValidateName(this)" />
+  <div class="field-hint">Letters, hyphens and apostrophes only — or your student ID</div>
 </div>
 <div class="f">
   <label>Academic Level <span class="field-note">— price shown in your local currency</span></label>
@@ -211,6 +347,17 @@ function renderUpload() {
 </button>`;
 }
 
+// ─── LIVE VALIDATION (runs on input / blur) ───────────────────────
+function liveValidateName(input) {
+  const err = validateName(input.value);
+  setFieldError("nameIn", err);
+}
+
+function liveValidateEmail(input) {
+  const err = validateEmail(input.value);
+  setFieldError("emailIn", err);
+}
+
 function bindUpload() {
   const fi = document.getElementById("fi");
   const dz = document.getElementById("dz");
@@ -238,11 +385,11 @@ function pickLevel(lv) { S.level = lv; renderWidget(); }
 
 async function toPayment() {
   const nm = document.getElementById("nameIn")?.value.trim();
-  if (!nm) return showErr("Please enter your name or student ID.");
+  const nameErr = validateName(nm || "");
+  if (nameErr) { setFieldError("nameIn", nameErr); showErr(nameErr); return; }
   if (!S.files.length) return showErr("Please upload at least one document.");
   S.name = nm;
 
-  // Upload files to server
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
 
@@ -284,11 +431,17 @@ function renderPayment() {
   <div class="ps-row total-row"><span class="ps-l">Total</span><span class="ps-total">${price?.formatted || "…"}</span></div>
 </div>
 <div class="f">
-  <label for="emailIn">Email address <span class="field-note">— for your receipt</span></label>
-  <input id="emailIn" type="email" placeholder="your@email.com"
-    value="${esc(S.email)}" autocomplete="email" maxlength="254" />
+  <label for="emailIn">Email address <span class="field-note">— for your receipt &amp; report access</span></label>
+  <input id="emailIn" type="email"
+    placeholder="e.g. name@gmail.com"
+    value="${esc(S.email)}"
+    autocomplete="email"
+    maxlength="254"
+    oninput="liveValidateEmail(this)"
+    onblur="liveValidateEmail(this)" />
+  <div class="field-hint">We accept all providers — Gmail, Yahoo, Outlook, iCloud, and more</div>
 </div>
-<p class="pay-note">🔒 Payment processed securely by Paystack · M-Pesa, Card & Bank Transfer accepted · Your documents are permanently deleted after your report is generated</p>
+<p class="pay-note">🔒 Secured by Paystack · M-Pesa, Visa, Mastercard &amp; Bank Transfer · Documents deleted after review</p>
 <button class="btn-w" type="button" onclick="doPayment()">
   Pay ${price?.formatted || "…"} — Secure Checkout
 </button>
@@ -297,7 +450,8 @@ function renderPayment() {
 
 async function doPayment() {
   const em = document.getElementById("emailIn")?.value.trim();
-  if (!em || !em.includes("@")) return showErr("Please enter a valid email address.");
+  const emailErr = validateEmail(em || "");
+  if (emailErr) { setFieldError("emailIn", emailErr); showErr(emailErr); return; }
   S.email = em;
 
   if (!S.paystackKey) return showErr("Payment system not ready. Please refresh and try again.");
@@ -307,9 +461,6 @@ async function doPayment() {
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
 
   try {
-    // Update email on server first
-    const form = new FormData();
-    // We re-use the submissionId but need to send email — handled by payment/init
     const initRes = await fetch("/api/payment/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -321,11 +472,10 @@ async function doPayment() {
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
-    // Launch Paystack popup with access_code (server-initialized)
     if (!window.PaystackPop) return showErr("Paystack failed to load. Please refresh.");
 
     window.PaystackPop.resumeTransaction(initData.access_code, {
-      onSuccess: async (transaction) => {
+      onSuccess: async () => {
         S.step = "processing";
         renderWidget();
         await verifyPayment(initData.reference);
@@ -367,9 +517,8 @@ function renderProcessing() {
 </div>`;
 }
 
-// ─── VERIFY PAYMENT & POLL FOR REVIEW ────────────────────────────
+// ─── VERIFY PAYMENT ───────────────────────────────────────────────
 async function verifyPayment(reference) {
-  // Animate progress
   S.progress = 8;
   const iv = setInterval(() => {
     if (S.progress < 85) S.progress = Math.min(85, S.progress + Math.random() * 5 + 2);
@@ -397,7 +546,6 @@ async function verifyPayment(reference) {
     S.progress = 100;
     updateProgress();
 
-    // Fetch the review result
     const reviewRes = await fetch(`/api/review/${data.reviewToken}`);
     const reviewData = await reviewRes.json();
 
@@ -617,9 +765,11 @@ function setupFAQ() {
 function setupMarquee() {
   const track = document.getElementById("stripTrack");
   if (!track) return;
-  const items = ["Master's Dissertations", "Doctoral Theses", "Research Papers", "Post-Doctoral Work",
+  const items = [
+    "Master's Dissertations", "Doctoral Theses", "Research Papers", "Post-Doctoral Work",
     "Up to 10 Documents", "Marking Guidelines Accepted", "Structured Written Feedback",
-    "Secure Submission", "Location-Based Pricing", "Level 7 to Level 10"];
+    "Secure Submission", "Location-Based Pricing", "Level 7 to Level 10",
+  ];
   const content = [...items, ...items]
     .map(t => `<span class="strip-item">${t}<span class="strip-sep">◆</span></span>`)
     .join("");
@@ -644,6 +794,163 @@ function setupCounters() {
     });
   }, { threshold: 0.5 });
   document.querySelectorAll("[data-count]").forEach(el => co.observe(el));
+}
+
+// ─── HERO: CURSOR-TRACKING GLOW ──────────────────────────────────
+/**
+ * A large soft radial glow that follows the mouse cursor within the hero section,
+ * giving a sense of depth and interactivity.
+ */
+function setupHeroCursor() {
+  const hero = document.getElementById("hero");
+  const cursor = document.getElementById("heroCursor");
+  if (!hero || !cursor) return;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  hero.addEventListener("mousemove", e => {
+    const rect = hero.getBoundingClientRect();
+    cursor.style.left = (e.clientX - rect.left) + "px";
+    cursor.style.top = (e.clientY - rect.top) + "px";
+  });
+}
+
+// ─── HERO: FLOATING PARTICLES ─────────────────────────────────────
+/**
+ * Draws tiny drifting particles on a canvas layered behind the hero content.
+ * Particles are soft sky-blue dots that move slowly upward and fade in/out.
+ * Uses requestAnimationFrame — automatically pauses when tab is hidden.
+ */
+function setupHeroParticles() {
+  const hero = document.getElementById("hero");
+  if (!hero) return;
+
+  // Create canvas
+  const canvas = document.createElement("canvas");
+  canvas.setAttribute("aria-hidden", "true");
+  canvas.style.cssText = `
+    position:absolute; inset:0; width:100%; height:100%;
+    z-index:0; pointer-events:none; opacity:0.6;
+  `;
+  hero.insertBefore(canvas, hero.firstChild);
+
+  const ctx = canvas.getContext("2d");
+
+  // Respect reduced-motion preference
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+  const PARTICLE_COUNT = 55;
+  let particles = [];
+  let W, H, animId;
+
+  function resize() {
+    const rect = hero.getBoundingClientRect();
+    W = canvas.width = rect.width;
+    H = canvas.height = rect.height;
+  }
+
+  function createParticle(randomY = false) {
+    const size = Math.random() * 2.2 + 0.6;  // 0.6 – 2.8px
+    return {
+      x: Math.random() * W,
+      y: randomY ? Math.random() * H : H + 10,
+      size,
+      speedY: Math.random() * 0.35 + 0.12,   // drift upward
+      speedX: (Math.random() - 0.5) * 0.18,  // slight horizontal wobble
+      opacity: Math.random() * 0.5 + 0.15,
+      fade: Math.random() > 0.5 ? 0.003 : -0.003,  // pulsing opacity
+      // Colour: sky blue at varying lightness
+      hue: Math.random() * 20 + 200,       // 200–220 — blue range
+      sat: Math.floor(Math.random() * 30 + 60),
+      lit: Math.floor(Math.random() * 20 + 70),
+    };
+  }
+
+  function init() {
+    resize();
+    particles = Array.from({ length: PARTICLE_COUNT }, () => createParticle(true));
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+
+    for (const p of particles) {
+      p.x += p.speedX;
+      p.y -= p.speedY;
+      p.opacity += p.fade;
+
+      // Reverse fade direction at bounds
+      if (p.opacity >= 0.65 || p.opacity <= 0.08) p.fade *= -1;
+
+      // Recycle particle when it exits the top
+      if (p.y < -10) Object.assign(p, createParticle(false));
+
+      // Draw soft glowing dot
+      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.5);
+      grad.addColorStop(0, `hsla(${p.hue},${p.sat}%,${p.lit}%,${p.opacity})`);
+      grad.addColorStop(1, `hsla(${p.hue},${p.sat}%,${p.lit}%,0)`);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+
+    animId = requestAnimationFrame(draw);
+  }
+
+  // Pause when tab not visible (saves CPU)
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { cancelAnimationFrame(animId); }
+    else { animId = requestAnimationFrame(draw); }
+  });
+
+  // Resize handler — debounced
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { resize(); }, 150);
+  });
+
+  init();
+  draw();
+}
+
+// ─── HERO: CARD FLOAT + BAR FILL ─────────────────────────────────
+/**
+ * After the hero card finishes its entry animation (1s delay + 1.2s duration = 2.2s),
+ * we:
+ *   1. Add the .loaded class to start the gentle float loop
+ *   2. Animate the score bars from 0 → their target width
+ *   3. Add a shimmer effect to the card border on hover
+ */
+function setupHeroCardFloat() {
+  const card = document.querySelector(".hero-card");
+  if (!card) return;
+
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    // Still fill the bars, just instantly
+    fillHeroBars(0);
+    return;
+  }
+
+  // After entry animation completes, activate float
+  setTimeout(() => {
+    card.classList.add("loaded");
+    fillHeroBars(300);   // slight extra delay so bars fill just after card settles
+  }, 2200);
+}
+
+function fillHeroBars(extraDelay) {
+  const bars = document.querySelectorAll(".hc-bar-f");
+  bars.forEach((bar, i) => {
+    // Read the target width from the inline style set in HTML
+    const target = bar.style.width || "70%";
+    // Store it as a CSS variable, reset to 0, then animate in
+    bar.style.setProperty("--bar-w", target);
+    bar.style.width = "0";
+    setTimeout(() => {
+      bar.classList.add("animated");
+    }, extraDelay + i * 180);  // stagger each bar by 180ms
+  });
 }
 
 // ─── SCROLL REVEAL ────────────────────────────────────────────────
@@ -673,11 +980,13 @@ function showErr(msg) {
   setTimeout(() => el.classList.remove("show"), 7000);
 }
 
-// ─── GLOBAL HELPERS (called from onclick) ─────────────────────────
+// ─── GLOBAL HELPERS ───────────────────────────────────────────────
 window.pickLevel = pickLevel;
 window.removeFile = removeFile;
 window.toPayment = toPayment;
 window.doPayment = doPayment;
 window.downloadReport = downloadReport;
 window.resetApp = resetApp;
+window.liveValidateName = liveValidateName;
+window.liveValidateEmail = liveValidateEmail;
 window.setLevel = (lv) => { S.level = lv; document.getElementById("submit")?.scrollIntoView({ behavior: "smooth" }); };
