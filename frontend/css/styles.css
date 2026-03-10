@@ -108,6 +108,26 @@ a {
   color: var(--sky);
 }
 
+.nav-logo-img {
+  height: 40px;
+  width: 40px;
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+.nav-logo-name {
+  font-family: var(--serif);
+  font-size: 1.35rem;
+  color: var(--white);
+  letter-spacing: 0.01em;
+}
+
+.nav-logo-name em {
+  font-style: italic;
+  color: var(--sky);
+}
+
 .nav-logo-mark {
   width: 30px;
   height: 30px;
@@ -238,25 +258,6 @@ a {
   100% {
     background-position: 60px 60px;
   }
-}
-
-/* ── Cursor-tracking radial glow ── */
-.hero-cursor {
-  position: absolute;
-  width: 480px;
-  height: 480px;
-  border-radius: 50%;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(185, 214, 242, 0.08) 0%, transparent 65%);
-  transform: translate(-50%, -50%);
-  transition: left 0.15s ease, top 0.15s ease;
-  opacity: 0;
-  /* Fades in once the mouse moves */
-}
-
-#hero:hover .hero-cursor {
-  opacity: 1;
 }
 
 .hero-beam {
