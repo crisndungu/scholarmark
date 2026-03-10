@@ -67,14 +67,6 @@ To change prices, edit `BASE_PRICES_GBP` in `backend/pricing.js`.
 ---
 
 ## Security Architecture
-
-### What was wrong before (single-file HTML)
-- ❌ Anthropic API key was in the HTML — visible to anyone who views source
-- ❌ Paystack secret key was in the HTML
-- ❌ Payment was only verified by the browser saying "success"
-- ❌ Anyone could forge a payment callback and get a free review
-- ❌ No record of transactions — no way to resolve disputes
-
 ### What this version does
 - ✅ **API keys never leave the server** — Anthropic and Paystack secret keys are in `.env`, never sent to the browser
 - ✅ **Paystack public key served from `/api/pubkey`** — even the public key isn't hardcoded in HTML
