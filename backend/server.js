@@ -76,11 +76,13 @@ app.use(helmet({
 }));
 
 // CORS — only allow your own frontend
+// AFTER
 const allowedOrigins = [
-  process.env.FRONTEND_URL || "http://localhost:3000",
+  "https://scholarmark.vercel.app",
+  process.env.FRONTEND_URL,
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-];
+].filter(Boolean);
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
