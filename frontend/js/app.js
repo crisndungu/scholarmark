@@ -114,9 +114,11 @@ document.addEventListener("DOMContentLoaded", async () => {
         S.step = "processing";
         renderWidget();
 
+        const finalPaystackRef = S.reference || paystackRef || urlParams.get('trxref');
+
         // Verify payment and trigger document processing
         // Now verifyPayment will also restore S with real data from DB
-        await verifyPayment(S.reference || paystackRef);
+        await verifyPayment(finalPaystackRef);
 
         // Clear stored data
         sessionStorage.removeItem("scholarmark_payment");

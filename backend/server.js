@@ -317,7 +317,10 @@ app.post("/api/payment/verify", async (req, res) => {
       });
     }
     const verification = await paystackRequest("GET", `/transaction/verify/${finalRef}`);
+    console.log(`[Verify/Paystack] Response for ${finalRef}:`, JSON.stringify(verification));
+
     if (!verification.status || verification.data?.status !== "success") {
+      console.error(`[Verify/Failure] Paystack status: ${verification.data?.status}, Message: ${verification.message}`);
       await db.updateTransactionFailed(finalRef);
       return res.status(402).json({ error: "Payment was not successful." });
     }

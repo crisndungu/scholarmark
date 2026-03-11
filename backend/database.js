@@ -72,6 +72,12 @@ async function initSchema() {
       console.log("[DB] Migrating: Adding extracted_text column to submissions table");
       await db.execute("ALTER TABLE submissions ADD COLUMN extracted_text TEXT");
     }
+    const txInfo = await db.execute("PRAGMA table_info(transactions)");
+    const hasInternalRef = txInfo.rows.some(r => r.name === 'paystack_internal_ref');
+    if (!hasInternalRef) {
+      console.log("[DB] Migrating: Adding paystack_internal_ref column to transactions table");
+      await db.execute("ALTER TABLE transactions ADD COLUMN paystack_internal_ref TEXT");
+    }
   } catch (migErr) {
     console.warn("[DB] Migration check failed (non-critical if fresh install):", migErr.message);
   }
@@ -126,8 +132,8 @@ const db_helpers = {
 
   async getTransactionByRef(ref) {
     const result = await db.execute({
-      sql: "SELECT * FROM transactions WHERE paystack_ref = ? COLLATE NOCASE",
-      args: [ref],
+      sql: "SELECT * FROM transactions WHERE (paystack_ref = ? COLLATE NOCASE) OR (paystack_internal_ref = ? COLLATE NOCASE)",
+      args: [ref, ref],
     });
     return toObj(result.rows[0]) || null;
   },
@@ -149,16 +155,20 @@ const db_helpers = {
   },
 
   async updateTransactionSuccess(ref, paystackData) {
+    const internalRef = paystackData.reference; // Paystack's returned ref (might be T...)
     await db.execute({
       sql: `UPDATE transactions
-            SET status = 'success', paystack_data = ?, verified_at = CURRENT_TIMESTAMP
-            WHERE paystack_ref = ?`,
-      args: [JSON.stringify(paystackData), ref],
+            SET status = 'success', 
+                paystack_data = ?, 
+                paystack_internal_ref = ?,
+                verified_at = CURRENT_TIMESTAMP
+            WHERE paystack_ref = ? OR paystack_internal_ref = ?`,
+      args: [JSON.stringify(paystackData), internalRef, ref, ref],
     });
     await db.execute({
       sql: `UPDATE submissions SET status = 'paid'
-            WHERE id = (SELECT submission_id FROM transactions WHERE paystack_ref = ?)`,
-      args: [ref],
+            WHERE id = (SELECT submission_id FROM transactions WHERE paystack_ref = ? OR paystack_internal_ref = ?)`,
+      args: [ref, ref],
     });
   },
 
