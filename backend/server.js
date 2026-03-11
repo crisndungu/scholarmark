@@ -204,7 +204,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     const geo = geoip.lookup(ip);
 
     const submissionId = uuidv4();
-    db.createSubmission({
+    await db.createSubmission({
       id: submissionId,
       name: name.trim().slice(0, 200),
       email: email.trim().toLowerCase().slice(0, 254),
@@ -258,7 +258,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
 
-    const submission = db.getSubmissionById(submissionId);
+    const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
 
     // If already paid, check if review exists and return it — don't block the user
@@ -301,7 +301,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
-    db.createTransaction({
+    await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
       paystack_ref: ref,
@@ -329,7 +329,7 @@ app.post("/api/payment/verify", async (req, res) => {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: "Reference required." });
 
-    const transaction = db.getTransactionByRef(reference);
+    const transaction = await db.getTransactionByRef(reference);
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
 
     if (transaction.status === "success") {
@@ -381,7 +381,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
     const ref = event.data?.reference;
     if (!ref) return;
 
-    const transaction = db.getTransactionByRef(ref);
+    const transaction = await db.getTransactionByRef(ref);
     if (!transaction || transaction.status === "success") return;
 
     if (event.data.amount !== transaction.amount) {
@@ -389,7 +389,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
       return;
     }
 
-    db.updateTransactionSuccess(ref, event.data);
+    await db.updateTransactionSuccess(ref, event.data);
     await triggerReview(transaction);
   } catch (err) {
     console.error("[Webhook] Error:", err);
@@ -397,7 +397,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
 });
 
 async function triggerReview(transaction) {
-  const submission = db.getSubmissionById(transaction.submission_id);
+  const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
 
   const cached = fileTextCache.get(submission.id);
@@ -475,7 +475,7 @@ ${docContext}
   const result = JSON.parse(raw);
 
   const reviewToken = crypto.randomBytes(48).toString("hex");
-  db.createReview({
+  await db.createReview({
     id: uuidv4(),
     submission_id: submission.id,
     transaction_id: transaction.id,
@@ -488,12 +488,12 @@ ${docContext}
   return reviewToken;
 }
 
-app.get("/api/review/:token", (req, res) => {
+app.get("/api/review/:token", async (req, res) => {
   try {
     const { token } = req.params;
     if (!token || token.length < 96) return res.status(400).json({ error: "Invalid token." });
 
-    const review = db.getReviewByToken(token);
+    const review = await db.getReviewByToken(token);
     if (!review) return res.status(404).json({ error: "Review not found. The link may have expired." });
 
     res.json({
