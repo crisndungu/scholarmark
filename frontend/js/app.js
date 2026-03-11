@@ -3,7 +3,6 @@
  * API_BASE is defined in config.js (loaded first in index.html)
  * All API keys live on the server. This file only talks to our own backend.
  */
-
 const S = {
   step: "upload",
   files: [],
@@ -19,9 +18,7 @@ const S = {
   review: null,
   progress: 0,
 };
-
 const MAX_FILES = 10;
-
 const LEVEL_DATA = {
   "Level 7": { short: "Master's", sub: "Postgraduate Taught", criteria: ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"] },
   "Level 8": { short: "Doctoral", sub: "PhD / Professional Doctorate", criteria: ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"] },
@@ -81,6 +78,7 @@ function setFieldError(inputId, message) {
     input.style.boxShadow = "0 0 0 3px rgba(34,197,94,0.1)";
   }
 }
+
 function clearFieldError(inputId) {
   const input = document.getElementById(inputId);
   const errEl = document.getElementById(inputId + "_err");
@@ -96,7 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
     "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES", amount: 3500 },
     "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES", amount: 5000 },
   };
-
   setupNav();
   setupFAQ();
   setupMarquee();
@@ -106,7 +103,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupHeroCardFloat();
   setupHeroCursor();
   renderWidget();
-
   loadLocationAndPricing().then(() => {
     updatePricingUI();
     if (S.step === "upload") renderWidget();
@@ -116,31 +112,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
 async function loadPaystackKey() {
   try {
-    const res = await fetch(`${API_BASE}/api/pubkey`);
+    console.log('[Fetch] Loading paystack key from:', `${API_BASE}/api/pubkey`);
+    const res = await fetch(`${API_BASE}/api/pubkey`, { credentials: 'include' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     S.paystackKey = data.key;
     console.log("[Paystack] Key loaded:", S.paystackKey ? "✓" : "✗ MISSING");
   } catch (e) {
-    console.error("Could not load payment config:", e);
+    console.error("[Paystack] Could not load payment config:", e);
   }
 }
 
 async function loadLocationAndPricing() {
   try {
+    console.log('[Fetch] Loading location from:', `${API_BASE}/api/location`);
     const res = await fetch(`${API_BASE}/api/location`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
+      credentials: 'include'
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (data.success) {
       S.country = data.country;
       S.currency = data.currency;
       S.prices = data.prices;
       updatePricingUI();
+      console.log('[Location] Detected:', S.country, S.currency);
     }
   } catch (e) {
-    console.warn("Location detection failed, using KES fallback");
+    console.warn("[Location] Detection failed, using KES fallback:", e);
   }
 }
 
@@ -163,6 +165,7 @@ function fileIcon(name) {
   if (ext === "txt") return "📄";
   return "📎";
 }
+
 function inferRole(file, index) {
   if (index === 0) return "Main document";
   const n = file.name.toLowerCase();
@@ -202,54 +205,54 @@ function renderUpload() {
   return `
 <div class="err-box" id="errBox"></div>
 <div class="f">
-  <label for="nameIn">Your Full Name or Student ID</label>
-  <input id="nameIn" type="text" placeholder="e.g. Jane Mwangi  or  STU-2024-001"
-    value="${esc(S.name)}" autocomplete="name" maxlength="200"
-    oninput="liveValidateName(this)" onblur="liveValidateName(this)" />
-  <div class="field-hint">Letters, hyphens and apostrophes only — or your student ID</div>
+<label for="nameIn">Your Full Name or Student ID</label>
+<input id="nameIn" type="text" placeholder="e.g. Jane Mwangi  or  STU-2024-001"
+value="${esc(S.name)}" autocomplete="name" maxlength="200"
+oninput="liveValidateName(this)" onblur="liveValidateName(this)" />
+<div class="field-hint">Letters, hyphens and apostrophes only — or your student ID</div>
 </div>
 <div class="f">
-  <label>Academic Level <span class="field-note">— price shown in KES</span></label>
-  <div class="lvl-grid">
-    ${Object.keys(LEVEL_DATA).map(k => `
-    <div class="lvl-opt${S.level === k ? " sel" : ""}" data-level="${k}"
-      onclick="pickLevel('${k}')" role="radio" aria-checked="${S.level === k}" tabindex="0"
-      onkeydown="if(event.key==='Enter'||event.key===' ')pickLevel('${k}')">
-      <div class="lo-n">${k} — ${LEVEL_DATA[k].short}</div>
-      <div class="lo-p">${S.prices[k]?.formatted || "…"}</div>
-    </div>`).join("")}
-  </div>
+<label>Academic Level <span class="field-note">— price shown in KES</span></label>
+<div class="lvl-grid">
+${Object.keys(LEVEL_DATA).map(k => `
+<div class="lvl-opt${S.level === k ? " sel" : ""}" data-level="${k}"
+onclick="pickLevel('${k}')" role="radio" aria-checked="${S.level === k}" tabindex="0"
+onkeydown="if(event.key==='Enter'||event.key===' ')pickLevel('${k}')">
+<div class="lo-n">${k} — ${LEVEL_DATA[k].short}</div>
+<div class="lo-p">${S.prices[k]?.formatted || "…"}</div>
+</div>`).join("")}
+</div>
 </div>
 <div class="f">
-  <label>Documents <span class="field-note">(main work + any guidelines, rubrics, marking briefs)</span></label>
-  <div class="dropzone${S.files.length >= MAX_FILES ? " at-limit" : ""}" id="dz"
-    onclick="${S.files.length < MAX_FILES ? "document.getElementById('fi').click()" : ""}"
-    role="button" tabindex="0" aria-label="Upload documents"
-    onkeydown="if(event.key==='Enter'||event.key===' ')document.getElementById('fi').click()">
-    <span class="dz-i">📁</span>
-    <div class="dz-t">${S.files.length >= MAX_FILES ? "Maximum files reached" : "Drop files here or click to browse"}</div>
-    <div class="dz-s">PDF · DOC · DOCX · TXT — up to 10MB each</div>
-    <span class="dz-pill">${S.files.length} / ${MAX_FILES} files</span>
-  </div>
-  <input type="file" id="fi" style="display:none" accept=".txt,.pdf,.doc,.docx" multiple />
-  ${S.files.length > 0 ? `
-  <div class="file-list">
-    ${S.files.map((f, i) => `
-    <div class="file-item">
-      <div class="fi-ico">${fileIcon(f.name)}</div>
-      <div class="fi-info">
-        <div class="fi-name">${esc(f.name)}</div>
-        <div class="fi-size">${(f.size / 1024).toFixed(0)} KB</div>
-      </div>
-      <div class="fi-role">${inferRole(f, i)}</div>
-      <button class="fi-rm" onclick="removeFile(${i})" aria-label="Remove ${esc(f.name)}" type="button">✕</button>
-    </div>`).join("")}
-  </div>
-  <div class="file-count">${S.files.length} file${S.files.length !== 1 ? "s" : ""} ready${S.files.length < MAX_FILES ? " — you may add more" : ""}</div>
-  ` : ""}
+<label>Documents <span class="field-note">(main work + any guidelines, rubrics, marking briefs)</span></label>
+<div class="dropzone${S.files.length >= MAX_FILES ? " at-limit" : ""}" id="dz"
+onclick="${S.files.length < MAX_FILES ? "document.getElementById('fi').click()" : ""}"
+role="button" tabindex="0" aria-label="Upload documents"
+onkeydown="if(event.key==='Enter'||event.key===' ')document.getElementById('fi').click()">
+<span class="dz-i">📁</span>
+<div class="dz-t">${S.files.length >= MAX_FILES ? "Maximum files reached" : "Drop files here or click to browse"}</div>
+<div class="dz-s">PDF · DOC · DOCX · TXT — up to 10MB each</div>
+<span class="dz-pill">${S.files.length} / ${MAX_FILES} files</span>
+</div>
+<input type="file" id="fi" style="display:none" accept=".txt,.pdf,.doc,.docx" multiple />
+${S.files.length > 0 ? `
+<div class="file-list">
+${S.files.map((f, i) => `
+<div class="file-item">
+<div class="fi-ico">${fileIcon(f.name)}</div>
+<div class="fi-info">
+<div class="fi-name">${esc(f.name)}</div>
+<div class="fi-size">${(f.size / 1024).toFixed(0)} KB</div>
+</div>
+<div class="fi-role">${inferRole(f, i)}</div>
+<button class="fi-rm" onclick="removeFile(${i})" aria-label="Remove ${esc(f.name)}" type="button">✕</button>
+</div>`).join("")}
+</div>
+<div class="file-count">${S.files.length} file${S.files.length !== 1 ? "s" : ""} ready${S.files.length < MAX_FILES ? " — you may add more" : ""}</div>
+` : ""}
 </div>
 <button class="btn-w" type="button" ${S.files.length === 0 ? "disabled" : ""} onclick="toPayment()">
-  Continue — ${priceForLevel}
+Continue — ${priceForLevel}
 </button>`;
 }
 
@@ -288,27 +291,28 @@ async function toPayment() {
   if (nameErr) { setFieldError("nameIn", nameErr); showErr(nameErr); return; }
   if (!S.files.length) return showErr("Please upload at least one document.");
   S.name = nm;
-
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
-
   try {
+    console.log('[Fetch] Submitting to:', `${API_BASE}/api/submission`);
     const form = new FormData();
     form.append("name", S.name);
     form.append("email", S.email || "pending@scholarmark.co.ke");
     form.append("level", S.level);
     form.append("currency", S.currency);
     S.files.forEach(f => form.append("files", f));
-
-    const res = await fetch(`${API_BASE}/api/submission`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/api/submission`, {
+      method: "POST",
+      body: form,
+      credentials: 'include'
+    });
     const data = await res.json();
-
     if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
-
     S.submissionId = data.submissionId;
     S.step = "payment";
     renderWidget();
   } catch (e) {
+    console.error('[Submission] Error:', e);
     showErr("Network error. Please check your connection and try again.");
   } finally {
     if (btn) { btn.disabled = false; }
@@ -322,21 +326,21 @@ function renderPayment() {
   return `
 <div class="err-box" id="errBox"></div>
 <div class="pay-sum">
-  <div class="ps-row"><span class="ps-l">Service</span><span class="ps-v">Level ${S.level.split(" ")[1]} — ${lv.short}</span></div>
-  <div class="ps-row"><span class="ps-l">Files submitted</span><span class="ps-v">${S.files.length} document${S.files.length !== 1 ? "s" : ""}</span></div>
-  <div class="ps-row"><span class="ps-l">Currency</span><span class="ps-v">KES — Kenyan Shillings</span></div>
-  <div class="ps-row total-row"><span class="ps-l">Total</span><span class="ps-total">${price?.formatted || "…"}</span></div>
+<div class="ps-row"><span class="ps-l">Service</span><span class="ps-v">Level ${S.level.split(" ")[1]} — ${lv.short}</span></div>
+<div class="ps-row"><span class="ps-l">Files submitted</span><span class="ps-v">${S.files.length} document${S.files.length !== 1 ? "s" : ""}</span></div>
+<div class="ps-row"><span class="ps-l">Currency</span><span class="ps-v">KES — Kenyan Shillings</span></div>
+<div class="ps-row total-row"><span class="ps-l">Total</span><span class="ps-total">${price?.formatted || "…"}</span></div>
 </div>
 <div class="f">
-  <label for="emailIn">Email address <span class="field-note">— for your receipt &amp; report access</span></label>
-  <input id="emailIn" type="email" placeholder="e.g. name@gmail.com"
-    value="${esc(S.email)}" autocomplete="email" maxlength="254"
-    oninput="liveValidateEmail(this)" onblur="liveValidateEmail(this)" />
-  <div class="field-hint">We accept all providers — Gmail, Yahoo, Outlook, iCloud, and more</div>
+<label for="emailIn">Email address <span class="field-note">— for your receipt &amp; report access</span></label>
+<input id="emailIn" type="email" placeholder="e.g. name@gmail.com"
+value="${esc(S.email)}" autocomplete="email" maxlength="254"
+oninput="liveValidateEmail(this)" onblur="liveValidateEmail(this)" />
+<div class="field-hint">We accept all providers — Gmail, Yahoo, Outlook, iCloud, and more</div>
 </div>
 <p class="pay-note">🔒 Secured by Paystack · M-Pesa, Visa, Mastercard &amp; Bank Transfer · Documents deleted after review</p>
 <button class="btn-w" type="button" onclick="doPayment()">
-  Pay ${price?.formatted || "…"} — Secure Checkout
+Pay ${price?.formatted || "…"} — Secure Checkout
 </button>
 <button class="btn-w-outline" type="button" onclick="S.step='upload';S.submissionId=null;renderWidget()">← Back</button>`;
 }
@@ -346,22 +350,28 @@ async function doPayment() {
   const emailErr = validateEmail(em || "");
   if (emailErr) { setFieldError("emailIn", emailErr); showErr(emailErr); return; }
   S.email = em;
-
   if (!S.paystackKey) return showErr("Payment system not ready. Please refresh and try again.");
   if (!S.submissionId) return showErr("Session expired. Please start again.");
-
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
-
   try {
+    console.log('[Fetch] Initializing payment:', `${API_BASE}/api/payment/init`);
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ submissionId: S.submissionId }),
+      credentials: 'include'
     });
+
+    if (!initRes.ok) {
+      const errText = await initRes.text();
+      console.error('[Payment/Init] HTTP Error:', initRes.status, errText);
+      throw new Error(`HTTP ${initRes.status}: ${errText}`);
+    }
+
     const initData = await initRes.json();
 
-    if (!initRes.ok || !initData.success) {
+    if (!initData.success) {
       if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
@@ -377,6 +387,7 @@ async function doPayment() {
     }
 
     console.log("[Payment] Init success, access_code:", initData.access_code);
+    console.log("[Payment] authorization_url:", initData.authorization_url);
 
     // ── FIX: Use PaystackPop correctly ──────────────────────────────
     // Check which version of PaystackPop is available
@@ -426,8 +437,15 @@ async function doPayment() {
       }
     }
   } catch (e) {
-    console.error("[Payment] Exception:", e);
-    showErr("Network error. Please check your connection.");
+    console.error("[Payment] Exception:", {
+      message: e.message,
+      name: e.name,
+      stack: e.stack,
+      API_BASE,
+      submissionId: S.submissionId,
+      paystackKey: S.paystackKey
+    });
+    showErr("Network error. Details in console. Please check your connection.");
     if (btn) { btn.disabled = false; }
   }
 }
@@ -444,28 +462,29 @@ function renderProcessing() {
   ];
   return `
 <div class="proc-wrap" aria-live="polite" aria-label="Review in progress">
-  <div class="proc-spin"></div>
-  <h3 class="proc-h">Reviewing your submission</h3>
-  <p class="proc-sub">Analysing ${S.files.length} document${S.files.length !== 1 ? "s" : ""} against ${S.level} criteria…</p>
-  <div class="proc-bar"><div class="proc-fill" id="pFill" style="width:${S.progress}%"></div></div>
-  <div class="proc-pct" id="pPct">${Math.round(S.progress)}%</div>
-  <div class="proc-steps">
-    ${stages.map(([t, lbl]) => `
-    <div class="proc-step${S.progress >= t + 15 ? " done" : S.progress >= t ? " active" : ""}" id="ps${t}">
-      <div class="ps-d"></div>${lbl}${S.progress >= t + 15 ? " ✓" : ""}
-    </div>`).join("")}
-  </div>
+<div class="proc-spin"></div>
+<h3 class="proc-h">Reviewing your submission</h3>
+<p class="proc-sub">Analysing ${S.files.length} document${S.files.length !== 1 ? "s" : ""} against ${S.level} criteria…</p>
+<div class="proc-bar"><div class="proc-fill" id="pFill" style="width:${S.progress}%"></div></div>
+<div class="proc-pct" id="pPct">${Math.round(S.progress)}%</div>
+<div class="proc-steps">
+${stages.map(([t, lbl]) => `
+<div class="proc-step${S.progress >= t + 15 ? " done" : S.progress >= t ? " active" : ""}" id="ps${t}">
+<div class="ps-d"></div>${lbl}${S.progress >= t + 15 ? " ✓" : ""}
+</div>`).join("")}
+</div>
 </div>`;
 }
 
 // ─── LOAD REVIEW BY TOKEN ─────────────────────────────────────────
-// Shared by verifyPayment and the alreadyPaid fast-path
 async function loadReview(token) {
   S.reviewToken = token;
   S.progress = 100;
   if (document.getElementById("pFill")) updateProgress();
   try {
-    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`);
+    console.log('[Fetch] Loading review:', `${API_BASE}/api/review/${token}`);
+    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`, { credentials: 'include' });
+    if (!reviewRes.ok) throw new Error(`HTTP ${reviewRes.status}`);
     const reviewData = await reviewRes.json();
     if (!reviewRes.ok || !reviewData.success) {
       S.step = "payment";
@@ -477,6 +496,7 @@ async function loadReview(token) {
     S.step = "results";
     setTimeout(() => renderWidget(), 400);
   } catch (e) {
+    console.error('[Review] Error:', e);
     S.step = "payment";
     renderWidget();
     showErr("Network error loading review. Please contact support.");
@@ -489,25 +509,26 @@ async function verifyPayment(reference) {
     if (S.progress < 85) S.progress = Math.min(85, S.progress + Math.random() * 5 + 2);
     updateProgress();
   }, 800);
-
   try {
+    console.log('[Fetch] Verifying payment:', `${API_BASE}/api/payment/verify`);
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reference }),
+      credentials: 'include'
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     clearInterval(iv);
-
     if (!res.ok || !data.success) {
       S.step = "payment";
       renderWidget();
       showErr(data.error || "Payment verification failed. Please contact support with reference: " + reference);
       return;
     }
-
     await loadReview(data.reviewToken);
   } catch (e) {
+    console.error('[Verify] Error:', e);
     clearInterval(iv);
     S.step = "payment";
     renderWidget();
@@ -535,48 +556,48 @@ function renderResults() {
   const sc = s => s >= 70 ? "var(--oxford)" : s >= 50 ? "#a16207" : "#b91c1c";
   return `
 <div class="res-scroll">
-  <div class="res-score-header">
-    <div class="res-score-box"><div class="rsb-n">${r.overallScore}</div><div class="rsb-d">/ 100</div></div>
-    <div class="res-info"><h4>${esc(r.grade)}</h4><p>${esc(r.executiveSummary)}</p></div>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Strengths</div>
-    <div class="tags-r">${r.strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("")}</div>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Weaknesses</div>
-    <div class="tags-r">${r.criticalWeaknesses.map(w => `<span class="tg tg-r">✗ ${esc(w)}</span>`).join("")}</div>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Criteria Scores</div>
-    <div class="crit-list">
-      ${Object.entries(r.criteriaScores).map(([n, d]) => `
-      <div>
-        <div class="crit-row">
-          <div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(d.feedback)}</div></div>
-          <div class="cr-score" style="color:${sc(d.score)}">${d.score}</div>
-        </div>
-        <div class="cr-bar"><div class="cr-fill" style="width:${d.score}%;background:${sc(d.score)}"></div></div>
-      </div>`).join("")}
-    </div>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Improvement Plan</div>
-    <div class="imp-list">
-      ${r.improvementPlan.map(i => `
-      <div class="imp-item">
-        <span class="imp-pri p${i.priority[0]}">${i.priority}</span>
-        <div>
-          <div class="imp-area">${esc(i.area)}</div>
-          <div class="imp-action">${esc(i.action)} — <em>${esc(i.rationale)}</em></div>
-        </div>
-      </div>`).join("")}
-    </div>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Resubmission Readiness</div>
-    <span class="readiness-v">${esc(r.resubmissionReadiness)}</span>
-  </div>
-  <div class="res-blk"><div class="res-lbl">Reviewer Commentary</div>
-    <div class="reviewer-note">${esc(r.reviewerNotes)}</div>
-  </div>
-  <button class="btn-w" type="button" onclick="downloadReport()" style="margin-top:4px">↓ Download Full Report (PDF)</button>
-  <button class="btn-w-outline" type="button" onclick="resetApp()">← Submit Another Document</button>
+<div class="res-score-header">
+<div class="res-score-box"><div class="rsb-n">${r.overallScore}</div><div class="rsb-d">/ 100</div></div>
+<div class="res-info"><h4>${esc(r.grade)}</h4><p>${esc(r.executiveSummary)}</p></div>
+</div>
+<div class="res-blk"><div class="res-lbl">Strengths</div>
+<div class="tags-r">${r.strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("")}</div>
+</div>
+<div class="res-blk"><div class="res-lbl">Weaknesses</div>
+<div class="tags-r">${r.criticalWeaknesses.map(w => `<span class="tg tg-r">✗ ${esc(w)}</span>`).join("")}</div>
+</div>
+<div class="res-blk"><div class="res-lbl">Criteria Scores</div>
+<div class="crit-list">
+${Object.entries(r.criteriaScores).map(([n, d]) => `
+<div>
+<div class="crit-row">
+<div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(d.feedback)}</div></div>
+<div class="cr-score" style="color:${sc(d.score)}">${d.score}</div>
+</div>
+<div class="cr-bar"><div class="cr-fill" style="width:${d.score}%;background:${sc(d.score)}"></div></div>
+</div>`).join("")}
+</div>
+</div>
+<div class="res-blk"><div class="res-lbl">Improvement Plan</div>
+<div class="imp-list">
+${r.improvementPlan.map(i => `
+<div class="imp-item">
+<span class="imp-pri p${i.priority[0]}">${i.priority}</span>
+<div>
+<div class="imp-area">${esc(i.area)}</div>
+<div class="imp-action">${esc(i.action)} — <em>${esc(i.rationale)}</em></div>
+</div>
+</div>`).join("")}
+</div>
+</div>
+<div class="res-blk"><div class="res-lbl">Resubmission Readiness</div>
+<span class="readiness-v">${esc(r.resubmissionReadiness)}</span>
+</div>
+<div class="res-blk"><div class="res-lbl">Reviewer Commentary</div>
+<div class="reviewer-note">${esc(r.reviewerNotes)}</div>
+</div>
+<button class="btn-w" type="button" onclick="downloadReport()" style="margin-top:4px">↓ Download Full Report (PDF)</button>
+<button class="btn-w-outline" type="button" onclick="resetApp()">← Submit Another Document</button>
 </div>`;
 }
 
@@ -610,12 +631,13 @@ function downloadReport() {
   if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 700); }
 }
 
-// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO (unchanged) ────────────
+// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO ────────────
 function setupNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;
   window.addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 50), { passive: true });
 }
+
 function setupFAQ() {
   document.querySelectorAll(".faq-q").forEach(q => {
     const toggle = () => {
@@ -627,6 +649,7 @@ function setupFAQ() {
     q.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
   });
 }
+
 function setupMarquee() {
   const track = document.getElementById("stripTrack");
   if (!track) return;
@@ -634,6 +657,7 @@ function setupMarquee() {
   const content = [...items, ...items].map(t => `<span class="strip-item">${t}<span class="strip-sep">◆</span></span>`).join("");
   track.innerHTML = content + content;
 }
+
 function setupCounters() {
   const co = new IntersectionObserver(entries => {
     entries.forEach(e => {
@@ -652,12 +676,14 @@ function setupCounters() {
   }, { threshold: 0.5 });
   document.querySelectorAll("[data-count]").forEach(el => co.observe(el));
 }
+
 function setupHeroCursor() {
   const hero = document.getElementById("hero"), cursor = document.getElementById("heroCursor");
   if (!hero || !cursor) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   hero.addEventListener("mousemove", e => { const r = hero.getBoundingClientRect(); cursor.style.left = (e.clientX - r.left) + "px"; cursor.style.top = (e.clientY - r.top) + "px"; });
 }
+
 function setupHeroParticles() {
   const hero = document.getElementById("hero");
   if (!hero) return;
@@ -688,12 +714,14 @@ function setupHeroParticles() {
   let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => resize(), 150); });
   init(); draw();
 }
+
 function setupHeroCardFloat() {
   const card = document.querySelector(".hero-card");
   if (!card) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { fillHeroBars(0); return; }
   setTimeout(() => { card.classList.add("loaded"); fillHeroBars(300); }, 2200);
 }
+
 function fillHeroBars(extraDelay) {
   document.querySelectorAll(".hc-bar-f").forEach((bar, i) => {
     const target = bar.style.width || "70%";
@@ -702,6 +730,7 @@ function fillHeroBars(extraDelay) {
     setTimeout(() => bar.classList.add("animated"), extraDelay + i * 180);
   });
 }
+
 function setupReveal() {
   const ro = new IntersectionObserver((entries) => {
     entries.forEach((e, i) => { if (e.isIntersecting) { setTimeout(() => e.target.classList.add("in"), i * 70); ro.unobserve(e.target); } });
@@ -713,6 +742,7 @@ function esc(s) {
   if (typeof s !== "string") return String(s ?? "");
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+
 function showErr(msg) {
   const el = document.getElementById("errBox");
   if (!el) return;

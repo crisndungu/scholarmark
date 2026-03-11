@@ -1,7 +1,6 @@
 /**
  * server.js — ScholarMark Backend
  */
-
 require("dotenv").config();
 const express = require("express");
 const helmet = require("helmet");
@@ -13,7 +12,6 @@ const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const fetch = require("node-fetch");
 const geoip = require("geoip-lite");
-
 const db = require("./database");
 const pricing = require("./pricing");
 
@@ -25,6 +23,7 @@ for (const key of FATAL_ENV) {
     process.exit(1);
   }
 }
+
 const WARN_ENV = ["PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY"];
 for (const key of WARN_ENV) {
   if (!process.env[key] || process.env[key].includes("XXXXXXX")) {
@@ -52,20 +51,22 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://js.paystack.co", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "https://js.paystack.co", "'unsafe-inline'", "'unsafe-eval'"],
       scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'", "https://paystack.com", "https://checkout.paystack.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://paystack.com"],
       connectSrc: [
         "'self'",
         "https://scholarmark.onrender.com",
         "https://scholarmark.vercel.app",
+        "https://scholarmark.co.ke",
+        "https://www.scholarmark.co.ke",
         "https://api.paystack.co",
         "https://checkout.paystack.com",
         "https://standard.paystack.co",
       ],
-      frameSrc: ["https://checkout.paystack.com", "https://standard.paystack.co"],
-      imgSrc: ["'self'", "data:", "https://*.paystack.co"],
+      frameSrc: ["https://checkout.paystack.com", "https://standard.paystack.com", "https://paystack.com"],
+      imgSrc: ["'self'", "data:", "https://*.paystack.co", "https://paystack.com", "https://checkout.paystack.com"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null,
     },
@@ -82,18 +83,47 @@ const allowedOrigins = [
   "https://www.scholarmark.co.ke",
   ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
 ];
+
 app.use(cors({
   origin: (origin, cb) => {
-    // Dynamically fully allow origins to avoid false positives in development
-    cb(null, origin || true);
+    // DEBUG LOG: See what origin is being received
+    console.log(`[CORS] Received Origin: ${origin}`);
+
+    if (!origin) {
+      console.log(`[CORS] No origin (same-origin request)`);
+      return cb(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      console.log(`[CORS] Origin Allowed: ${origin}`);
+      return cb(null, true);
+    }
+
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) {
+      console.log(`[CORS] Vercel preview allowed: ${origin}`);
+      return cb(null, true);
+    }
+
+    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) {
+      console.log(`[CORS] Render preview allowed: ${origin}`);
+      return cb(null, true);
+    }
+
+    console.warn(`[CORS] Blocked Origin: ${origin}`);
+    cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
+  // Explicitly allow headers to prevent preflight issues
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
 }));
 
 // ─── RATE LIMITERS ────────────────────────────────────────────────
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: "Too many requests. Please try again shortly." } });
 const submissionLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: "Submission limit reached. Please try again in an hour." } });
 const paymentLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: "Payment request limit reached. Please try again later." } });
+
 app.use("/api", generalLimiter);
 
 // ─── RAW BODY for Webhook (MUST be before express.json) ───────────
@@ -145,7 +175,6 @@ function extractText(buffer) {
 }
 
 // ─── ROUTES ───────────────────────────────────────────────────────
-
 app.get("/api/pubkey", (req, res) => {
   res.json({ key: process.env.PAYSTACK_PUBLIC_KEY });
 });
@@ -175,17 +204,13 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     if (!level || !["Level 7", "Level 8", "Level 9", "Level 10"].includes(level))
       return res.status(400).json({ error: "Invalid academic level." });
     if (!req.files?.length) return res.status(400).json({ error: "At least one file is required." });
-
     const useCurrency = "KES";
     const prices = await pricing.getPricingForCurrency(useCurrency);
     const priceData = prices[level];
     if (!priceData) return res.status(400).json({ error: "Invalid level." });
-
     const ip = getClientIP(req);
     const geo = geoip.lookup(ip);
     const submissionId = uuidv4();
-
-    // ✅ await — createSubmission is async
     await db.createSubmission({
       id: submissionId,
       name: name.trim().slice(0, 200),
@@ -198,12 +223,10 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       country_code: geo?.country || null,
       ip_address: ip,
     });
-
     fileTextCache.set(submissionId, {
       texts: req.files.map(f => ({ name: f.originalname, text: extractText(f.buffer) })),
       created: Date.now(),
     });
-
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
@@ -216,14 +239,9 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   try {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
-
-    // ✅ await — getSubmissionById is async
     const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
-
     console.log(`[Payment/Init] Submission: id=${submission.id} amount=${submission.amount} email=${submission.email}`);
-
-    // ✅ await — hasSuccessfulPayment is async
     if (await db.hasSuccessfulPayment(submissionId)) {
       const existingReview = await db.getReviewBySubmissionId(submissionId);
       if (existingReview) {
@@ -231,11 +249,10 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       }
       return res.status(400).json({ error: "Already paid. Contact support if your review is missing." });
     }
-
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
     const paystackPayload = {
       email: submission.email,
-      amount: Number(submission.amount),   // KES 1500 → 150000 cents
+      amount: submission.amount,
       reference: ref,
       metadata: {
         submission_id: submissionId,
@@ -245,16 +262,12 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       },
       channels: ["card", "mobile_money", "bank_transfer"],
     };
-
     console.log("[Payment/Init] Paystack payload:", JSON.stringify(paystackPayload));
     const paystackRes = await paystackRequest("POST", "/transaction/initialize", paystackPayload);
-
     if (!paystackRes.status) {
       console.error("[Payment/Init] Paystack error:", JSON.stringify(paystackRes));
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
-
-    // ✅ await — createTransaction is async
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
@@ -262,7 +275,6 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       amount: submission.amount,
       currency: submission.currency,
     });
-
     console.log(`[Payment/Init] Success — ref: ${ref}, access_code: ${paystackRes.data.access_code}`);
     res.json({
       success: true,
@@ -280,24 +292,18 @@ app.post("/api/payment/verify", async (req, res) => {
   try {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: "Reference required." });
-
-    // ✅ await — getTransactionByRef is async
     const transaction = await db.getTransactionByRef(reference);
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
-
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
       if (existingReview) return res.json({ success: true, reviewToken: existingReview.token });
       return res.json({ success: true, status: "paid_awaiting_review" });
     }
-
     const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
     if (!verification.status || verification.data?.status !== "success") {
       await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment was not successful." });
     }
-
-    // Amount check — relaxed in test/dev mode
     if (verification.data.amount !== transaction.amount) {
       console.warn(`[Amount] Mismatch ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
       if (process.env.NODE_ENV === "production") {
@@ -306,7 +312,6 @@ app.post("/api/payment/verify", async (req, res) => {
       }
       console.warn("[Amount] Continuing in non-production mode despite mismatch");
     }
-
     await db.updateTransactionSuccess(reference, verification.data);
     const reviewToken = await triggerReview(transaction);
     res.json({ success: true, reviewToken });
@@ -327,7 +332,6 @@ app.post("/api/webhook/paystack", async (req, res) => {
     if (event.event !== "charge.success") return;
     const ref = event.data?.reference;
     if (!ref) return;
-    // ✅ await
     const transaction = await db.getTransactionByRef(ref);
     if (!transaction || transaction.status === "success") return;
     if (event.data.amount !== transaction.amount) { console.error(`[Webhook/FRAUD] Amount mismatch ref ${ref}`); return; }
@@ -339,16 +343,14 @@ app.post("/api/webhook/paystack", async (req, res) => {
 });
 
 async function triggerReview(transaction) {
-  // ✅ await — getSubmissionById is async
   const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
-
   const cached = fileTextCache.get(submission.id);
   const files = cached?.texts || [];
   const docContext = files.length
-    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n\n")
+    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---
+${f.text}`).join("\n")
     : "[Document text unavailable — files may have expired from cache]";
-
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -356,40 +358,34 @@ async function triggerReview(transaction) {
     "Level 10": ["Paradigm Contribution", "Global Scholarly Relevance", "Policy Implications", "Pedagogical Value", "Legacy Impact"],
   };
   const criteria = levelCriteria[submission.level] || levelCriteria["Level 7"];
-
   const prompt = `You are a senior academic examiner assessing ${submission.level} work.
 The candidate has submitted ${submission.file_count} document(s). The first is their main submission. Any additional documents are supporting materials.
-
 Read all documents and provide an honest, rigorous, specific review. Reference the actual content directly.
-
 Return ONLY valid JSON. No markdown, no preamble.
-
 {
-  "overallScore": <integer 0-100>,
-  "grade": "<Distinction|Merit|Pass|Fail>",
-  "executiveSummary": "<2-3 precise sentences directly referencing the work>",
-  "strengths": ["<specific strength>","<strength 2>","<strength 3>"],
-  "criticalWeaknesses": ["<specific weakness>","<weakness 2>","<weakness 3>"],
-  "criteriaScores": {
-    ${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence>" }`).join(",\n    ")}
-  },
-  "improvementPlan": [
-    { "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-    { "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-    { "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-    { "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-    { "priority": "Low",    "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" }
-  ],
-  "recommendedResources": ["<resource 1>","<resource 2>","<resource 3>"],
-  "resubmissionReadiness": "<Ready for Submission|Minor Revisions Required|Major Revisions Required|Not Ready for Submission>",
-  "reviewerNotes": "<One honest paragraph of final commentary>"
+"overallScore": <integer 0-100>,
+"grade": "<Distinction|Merit|Pass|Fail>",
+"executiveSummary": "<2-3 precise sentences directly referencing the work>",
+"strengths": ["<specific strength>","<strength 2>","<strength 3>"],
+"criticalWeaknesses": ["<specific weakness>","<weakness 2>","<weakness 3>"],
+"criteriaScores": {
+${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence>" }`).join(",\n")}
+},
+"improvementPlan": [
+{ "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
+{ "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
+{ "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
+{ "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
+{ "priority": "Low",    "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" }
+],
+"recommendedResources": ["<resource 1>","<resource 2>","<resource 3>"],
+"resubmissionReadiness": "<Ready for Submission|Minor Revisions Required|Major Revisions Required|Not Ready for Submission>",
+"reviewerNotes": "<One honest paragraph of final commentary>"
 }
-
 SUBMITTED DOCUMENTS:
 """
 ${docContext}
 """`;
-
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -403,18 +399,14 @@ ${docContext}
       messages: [{ role: "user", content: prompt }],
     }),
   });
-
   if (!anthropicRes.ok) {
     const txt = await anthropicRes.text();
     throw new Error(`Anthropic API error ${anthropicRes.status}: ${txt}`);
   }
-
   const anthropicData = await anthropicRes.json();
   const raw = anthropicData.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
   const result = JSON.parse(raw);
-
   const reviewToken = crypto.randomBytes(48).toString("hex");
-  // ✅ await — createReview is async
   await db.createReview({
     id: uuidv4(),
     submission_id: submission.id,
@@ -422,7 +414,6 @@ ${docContext}
     result_json: JSON.stringify(result),
     token: reviewToken,
   });
-
   fileTextCache.delete(submission.id);
   console.log(`[Review] Completed for submission ${submission.id}`);
   return reviewToken;
@@ -432,7 +423,6 @@ app.get("/api/review/:token", async (req, res) => {
   try {
     const { token } = req.params;
     if (!token || token.length < 96) return res.status(400).json({ error: "Invalid token." });
-    // ✅ await — getReviewByToken is async
     const review = await db.getReviewByToken(token);
     if (!review) return res.status(404).json({ error: "Review not found. The link may have expired." });
     res.json({
@@ -461,10 +451,12 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n  ┌─────────────────────────────────────┐`);
+  console.log(`
+┌─────────────────────────────────────┐`);
   console.log(`  │  ScholarMark running on port ${PORT}   │`);
   console.log(`  │  ENV: ${process.env.NODE_ENV || "development"}                   │`);
-  console.log(`  └─────────────────────────────────────┘\n`);
+  console.log(`  └─────────────────────────────────────┘
+`);
 });
 
 module.exports = app;
