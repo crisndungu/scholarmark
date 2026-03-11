@@ -34,10 +34,9 @@ for (const key of WARN_ENV) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Required on Render — fixes express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
 app.set("trust proxy", 1);
 
-// ─── FILE CACHE (declared before routes) ──────────────────────────
+// ─── FILE CACHE ───────────────────────────────────────────────────
 const fileTextCache = new Map();
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
@@ -46,7 +45,7 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
-// ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
+// ─── SECURITY MIDDLEWARE ──────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -66,7 +65,7 @@ app.use(helmet({
         "https://standard.paystack.co",
       ],
       frameSrc: ["https://checkout.paystack.com", "https://paystack.com", "https://standard.paystack.co"],
-      imgSrc: ["'self'", "", "https://*.paystack.co", "https://paystack.com", "https://checkout.paystack.com"],
+      imgSrc: ["'self'", "data:", "https://*.paystack.co", "https://paystack.com", "https://checkout.paystack.com"],
       objectSrc: ["'none'"],
       upgradeInsecureRequests: process.env.NODE_ENV === "production" ? [] : null,
     },
@@ -86,37 +85,18 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    // DEBUG LOG: See what origin is being received
     console.log(`[CORS] Received Origin: ${origin}`);
-
-    if (!origin) {
-      console.log(`[CORS] No origin (same-origin request)`);
-      return cb(null, true);
-    }
-
-    if (allowedOrigins.includes(origin)) {
-      console.log(`[CORS] Origin Allowed: ${origin}`);
-      return cb(null, true);
-    }
-
-    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) {
-      console.log(`[CORS] Vercel preview allowed: ${origin}`);
-      return cb(null, true);
-    }
-
-    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) {
-      console.log(`[CORS] Render preview allowed: ${origin}`);
-      return cb(null, true);
-    }
-
+    if (!origin) return cb(null, true);
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
     console.warn(`[CORS] Blocked Origin: ${origin}`);
     cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
-  // Explicitly allow headers to prevent preflight issues
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+  exposedHeaders: ["Content-Range", "X-Content-Range"],
 }));
 
 // ─── RATE LIMITERS ────────────────────────────────────────────────
@@ -242,6 +222,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
     console.log(`[Payment/Init] Submission: id=${submission.id} amount=${submission.amount} email=${submission.email}`);
+
     if (await db.hasSuccessfulPayment(submissionId)) {
       const existingReview = await db.getReviewBySubmissionId(submissionId);
       if (existingReview) {
@@ -249,19 +230,14 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       }
       return res.status(400).json({ error: "Already paid. Contact support if your review is missing." });
     }
-    const originUrl = req.headers.origin || req.headers.referer || "https://www.scholarmark.co.ke";
-    let callbackUrl;
-    try {
-      callbackUrl = new URL(originUrl).origin + "/";
-    } catch (e) {
-      callbackUrl = "https://www.scholarmark.co.ke/";
-    }
+
+    // Generate reference BEFORE using it
+    const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
 
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
       reference: ref,
-      callback_url: callbackUrl,
       metadata: {
         submission_id: submissionId,
         level: submission.level,
@@ -271,11 +247,13 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       channels: ["card", "mobile_money", "bank_transfer"],
     };
     console.log("[Payment/Init] Paystack payload:", JSON.stringify(paystackPayload));
+
     const paystackRes = await paystackRequest("POST", "/transaction/initialize", paystackPayload);
     if (!paystackRes.status) {
       console.error("[Payment/Init] Paystack error:", JSON.stringify(paystackRes));
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
+
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
@@ -283,6 +261,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       amount: submission.amount,
       currency: submission.currency,
     });
+
     console.log(`[Payment/Init] Success — ref: ${ref}, access_code: ${paystackRes.data.access_code}`);
     res.json({
       success: true,
@@ -356,8 +335,7 @@ async function triggerReview(transaction) {
   const cached = fileTextCache.get(submission.id);
   const files = cached?.texts || [];
   const docContext = files.length
-    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---
-${f.text}`).join("\n")
+    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n")
     : "[Document text unavailable — files may have expired from cache]";
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
@@ -459,12 +437,10 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`
-┌─────────────────────────────────────┐`);
+  console.log(`\n┌─────────────────────────────────────┐`);
   console.log(`  │  ScholarMark running on port ${PORT}   │`);
   console.log(`  │  ENV: ${process.env.NODE_ENV || "development"}                   │`);
-  console.log(`  └─────────────────────────────────────┘
-`);
+  console.log(`  └─────────────────────────────────────┘\n`);
 });
 
 module.exports = app;
