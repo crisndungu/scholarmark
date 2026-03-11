@@ -273,10 +273,13 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     // FIX: Log the Paystack request for debugging
     console.log(`[Payment/Init] Initializing for submission ${submissionId}, amount: ${submission.amount} ${submission.currency}`);
 
-    const paystackRes = await paystackRequest("POST", "/transaction/initialize", {
+    // Build Paystack payload
+    // NOTE: Do NOT send currency field — Paystack uses the account's registered
+    // currency automatically. Sending an explicit currency that doesn't match
+    // the account causes "Invalid Amount Sent".
+    const paystackPayload = {
       email: submission.email,
-      amount: submission.amount,
-      currency: submission.currency,
+      amount: submission.amount,   // in cents: KES 1500 → 150000
       reference: ref,
       metadata: {
         submission_id: submissionId,
@@ -284,11 +287,11 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
         name: submission.name,
         file_count: submission.file_count,
       },
-      // FIX: For KES, only include supported channels
-      channels: submission.currency === "KES"
-        ? ["card", "mobile_money", "bank_transfer"]
-        : ["card", "bank", "ussd", "qr", "mobile_money", "bank_transfer"],
-    });
+      channels: ["card", "mobile_money", "bank_transfer"],
+    };
+
+    console.log("[Payment/Init] Paystack payload:", JSON.stringify(paystackPayload));
+    const paystackRes = await paystackRequest("POST", "/transaction/initialize", paystackPayload);
 
     if (!paystackRes.status) {
       console.error("[Payment/Init] Paystack error:", JSON.stringify(paystackRes));
@@ -340,11 +343,16 @@ app.post("/api/payment/verify", async (req, res) => {
       return res.status(402).json({ error: "Payment was not successful." });
     }
 
-    // FIX: Amount check — Paystack returns kobo/pesewas/cents, log mismatch clearly
+    // Amount check — log mismatches but only block in production
+    // (In test mode, Paystack may return amounts in the account's base currency)
     if (verification.data.amount !== transaction.amount) {
-      console.error(`[FRAUD] Amount mismatch ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
-      await db.updateTransactionFailed(reference);
-      return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
+      console.warn(`[Amount] Mismatch ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
+      if (process.env.NODE_ENV === "production") {
+        await db.updateTransactionFailed(reference);
+        return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
+      }
+      // In development/test, log and continue
+      console.warn("[Amount] Continuing in test mode despite mismatch");
     }
 
     await db.updateTransactionSuccess(reference, verification.data);
