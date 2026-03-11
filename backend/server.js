@@ -277,15 +277,24 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
 
 app.post("/api/payment/verify", async (req, res) => {
   try {
-    const { reference } = req.body;
-    if (!reference) return res.status(400).json({ error: "Reference required." });
-    console.log("[Verify/Start] Received reference:", reference);
-    const transaction = await db.getTransactionByRef(reference);
+    const { reference, submissionId } = req.body;
+    if (!reference && !submissionId) return res.status(400).json({ error: "Reference or Submission ID required." });
+
+    console.log(`[Verify/Start] Received ref: ${reference}, subId: ${submissionId}`);
+
+    let transaction = await db.getTransactionByRef(reference);
+    if (!transaction && submissionId) {
+      console.log(`[Verify/Fallback] Ref not found, trying fallback subId: ${submissionId}`);
+      transaction = await db.getTransactionBySubmission(submissionId);
+    }
+
     if (!transaction) {
-      console.error("[Verify/Error] Transaction not found for ref:", reference);
+      console.error("[Verify/Error] Transaction not found for ref/subId");
       return res.status(404).json({ error: "Transaction not found." });
     }
-    console.log(`[Verify/Status] Found transaction ${transaction.id}, current status: ${transaction.status}`);
+
+    const finalRef = transaction.paystack_ref;
+    console.log(`[Verify/Status] Using transaction ${transaction.id}, ref: ${finalRef}, status: ${transaction.status}`);
 
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
@@ -302,20 +311,20 @@ app.post("/api/payment/verify", async (req, res) => {
         } : null
       });
     }
-    const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
+    const verification = await paystackRequest("GET", `/transaction/verify/${finalRef}`);
     if (!verification.status || verification.data?.status !== "success") {
-      await db.updateTransactionFailed(reference);
+      await db.updateTransactionFailed(finalRef);
       return res.status(402).json({ error: "Payment was not successful." });
     }
     if (verification.data.amount !== transaction.amount) {
-      console.warn(`[Amount] Mismatch ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
+      console.warn(`[Amount] Mismatch ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);
       if (process.env.NODE_ENV === "production") {
-        await db.updateTransactionFailed(reference);
+        await db.updateTransactionFailed(finalRef);
         return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
       }
       console.warn("[Amount] Continuing in non-production mode despite mismatch");
     }
-    await db.updateTransactionSuccess(reference, verification.data);
+    await db.updateTransactionSuccess(finalRef, verification.data);
     const reviewToken = await triggerReview(transaction);
     const submission = await db.getSubmissionById(transaction.submission_id);
     res.json({

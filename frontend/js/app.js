@@ -559,7 +559,7 @@ async function verifyPayment(reference) {
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference }),
+      body: JSON.stringify({ reference, submissionId: S.submissionId }),
       credentials: 'include'
     });
 

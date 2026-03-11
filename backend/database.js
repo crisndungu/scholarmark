@@ -134,7 +134,7 @@ const db_helpers = {
 
   async getTransactionBySubmission(submissionId) {
     const result = await db.execute({
-      sql: "SELECT * FROM transactions WHERE submission_id = ? AND status = 'success' LIMIT 1",
+      sql: "SELECT * FROM transactions WHERE submission_id = ? ORDER BY created_at DESC LIMIT 1",
       args: [submissionId],
     });
     return toObj(result.rows[0]) || null;
