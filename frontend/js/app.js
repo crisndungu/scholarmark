@@ -475,6 +475,7 @@ async function doPayment() {
         key: S.paystackKey,
         email: S.email,
         amount: S.prices[S.level].minor,
+        currency: "KES",
         ref: initData.reference,
         metadata: {
           submission_id: S.submissionId,

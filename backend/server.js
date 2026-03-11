@@ -233,6 +233,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
+      currency: "KES",
       reference: ref,
       callback_url: callback_url || frontendUrl,   // ← Use dynamically sent URL if available
       metadata: {
