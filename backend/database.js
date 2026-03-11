@@ -63,6 +63,19 @@ async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_reviews_token     ON reviews(token);
     CREATE INDEX IF NOT EXISTS idx_reviews_sub       ON reviews(submission_id);
   `);
+
+  // Migration: Add extracted_text column if missing
+  try {
+    const tableInfo = await db.execute("PRAGMA table_info(submissions)");
+    const hasExtractedText = tableInfo.rows.some(r => r.name === 'extracted_text');
+    if (!hasExtractedText) {
+      console.log("[DB] Migrating: Adding extracted_text column to submissions table");
+      await db.execute("ALTER TABLE submissions ADD COLUMN extracted_text TEXT");
+    }
+  } catch (migErr) {
+    console.warn("[DB] Migration check failed (non-critical if fresh install):", migErr.message);
+  }
+
   console.log("[DB] Turso ready at", process.env.TURSO_URL);
 }
 

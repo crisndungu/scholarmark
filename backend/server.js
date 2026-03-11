@@ -136,12 +136,14 @@ async function paystackRequest(method, endpoint, body) {
 
 function extractText(buffer) {
   try {
+    // Basic text extraction: try UTF-8 first
+    // In a production environment, you'd use pdf-parse or mammoth.js here.
     const txt = buffer.toString("utf8");
-    const printable = txt.replace(/[^\x20-\x7E\r\n\t]/g, "").length;
-    if (printable / txt.length > 0.7) return txt.slice(0, 15000);
-    return txt.replace(/[^\x20-\x7E\r\n\t]/g, " ").replace(/\s+/g, " ").trim().slice(0, 15000);
-  } catch (e) {
-    return buffer.toString("latin1").replace(/[^\x20-\x7E\r\n\t]/g, " ").slice(0, 15000);
+    // Filter out non-printable characters but keep common whitespace
+    return txt.replace(/[^\x20-\x7E\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
+  } catch (err) {
+    console.error("[Extract] Failed to extract text:", err.message);
+    return "[Error extracting text from this file]";
   }
 }
 
@@ -198,8 +200,11 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
-    console.error("[Submission]", err);
-    res.status(500).json({ error: "Submission failed. Please try again." });
+    console.error("[Submission] CRITICAL ERROR:", err);
+    res.status(500).json({
+      error: "Submission failed. This is usually due to a database sync issue. Please try again or contact support.",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined
+    });
   }
 });
 
