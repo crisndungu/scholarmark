@@ -17,8 +17,6 @@ const geoip = require("geoip-lite");
 const db = require("./database");
 const pricing = require("./pricing");
 
-
-
 // ─── CONFIG VALIDATION ────────────────────────────────────────────
 const FATAL_ENV = ["ANTHROPIC_API_KEY", "SESSION_SECRET"];
 for (const key of FATAL_ENV) {
@@ -35,7 +33,6 @@ for (const key of WARN_ENV) {
 }
 
 const app = express();
-app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 // ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
@@ -52,6 +49,7 @@ app.use(helmet({
       connectSrc: [
         "'self'",
         "https://scholarmark.onrender.com",
+        "https://scholarmark.vercel.app",
         "https://api.paystack.co",
         "https://checkout.paystack.com",
         "https://standard.paystack.co",
@@ -69,19 +67,26 @@ const allowedOrigins = [
   // Local dev
   "http://localhost:3000",
   "http://127.0.0.1:3000",
-  // Render — backend serves frontend directly, so same-origin requests have no Origin header (fine)
-  // But if you ever split frontend/backend to separate Render services, add the frontend URL here:
+  // Render backend
   "https://scholarmark.onrender.com",
+  // Vercel frontend — all preview + production URLs
+  "https://scholarmark.vercel.app",
+  // Custom domain
   "https://scholarmark.co.ke",
   "https://www.scholarmark.co.ke",
-  // From .env — override for any other domain
+  // From .env — add any extra domain here
   ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
 ];
 app.use(cors({
   origin: (origin, cb) => {
-    // No origin = same-origin request (server-rendered, curl, Postman) — always allow
+    // No origin = same-origin / curl / Postman — always allow
     if (!origin) return cb(null, true);
+    // Exact match
     if (allowedOrigins.includes(origin)) return cb(null, true);
+    // Allow ANY vercel.app subdomain (covers preview deployments like scholarmark-git-main-xxx.vercel.app)
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+    // Allow any onrender.com subdomain
+    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
     console.warn(`[CORS] Blocked origin: ${origin}`);
     cb(new Error("CORS: origin not allowed"));
   },
@@ -204,7 +209,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     const geo = geoip.lookup(ip);
 
     const submissionId = uuidv4();
-    await db.createSubmission({
+    db.createSubmission({
       id: submissionId,
       name: name.trim().slice(0, 200),
       email: email.trim().toLowerCase().slice(0, 254),
@@ -258,7 +263,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
 
-    const submission = await db.getSubmissionById(submissionId);
+    const submission = db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
 
     // If already paid, check if review exists and return it — don't block the user
@@ -301,7 +306,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
-    await db.createTransaction({
+    db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
       paystack_ref: ref,
@@ -329,7 +334,7 @@ app.post("/api/payment/verify", async (req, res) => {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: "Reference required." });
 
-    const transaction = await db.getTransactionByRef(reference);
+    const transaction = db.getTransactionByRef(reference);
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
 
     if (transaction.status === "success") {
@@ -381,7 +386,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
     const ref = event.data?.reference;
     if (!ref) return;
 
-    const transaction = await db.getTransactionByRef(ref);
+    const transaction = db.getTransactionByRef(ref);
     if (!transaction || transaction.status === "success") return;
 
     if (event.data.amount !== transaction.amount) {
@@ -389,7 +394,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
       return;
     }
 
-    await db.updateTransactionSuccess(ref, event.data);
+    db.updateTransactionSuccess(ref, event.data);
     await triggerReview(transaction);
   } catch (err) {
     console.error("[Webhook] Error:", err);
@@ -397,7 +402,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
 });
 
 async function triggerReview(transaction) {
-  const submission = await db.getSubmissionById(transaction.submission_id);
+  const submission = db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
 
   const cached = fileTextCache.get(submission.id);
@@ -475,7 +480,7 @@ ${docContext}
   const result = JSON.parse(raw);
 
   const reviewToken = crypto.randomBytes(48).toString("hex");
-  await db.createReview({
+  db.createReview({
     id: uuidv4(),
     submission_id: submission.id,
     transaction_id: transaction.id,
@@ -488,12 +493,12 @@ ${docContext}
   return reviewToken;
 }
 
-app.get("/api/review/:token", async (req, res) => {
+app.get("/api/review/:token", (req, res) => {
   try {
     const { token } = req.params;
     if (!token || token.length < 96) return res.status(400).json({ error: "Invalid token." });
 
-    const review = await db.getReviewByToken(token);
+    const review = db.getReviewByToken(token);
     if (!review) return res.status(404).json({ error: "Review not found. The link may have expired." });
 
     res.json({
