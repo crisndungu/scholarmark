@@ -472,6 +472,7 @@ async function doPayment() {
     if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
       console.log("[Payment] Using Paystack Inline (with access_code)");
       const handler = window.PaystackPop.setup({
+        key: S.paystackKey,
         access_code: initData.access_code,
         callback: function (response) {
           console.log("[Payment] Paystack callback — ref:", response.reference);
