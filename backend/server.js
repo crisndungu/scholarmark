@@ -36,15 +36,6 @@ const PORT = process.env.PORT || 3000;
 
 app.set("trust proxy", 1);
 
-// ─── FILE CACHE ───────────────────────────────────────────────────
-const fileTextCache = new Map();
-setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-  for (const [key, val] of fileTextCache) {
-    if (val.created < cutoff) fileTextCache.delete(key);
-  }
-}, 30 * 60 * 1000);
-
 // ─── SECURITY MIDDLEWARE ──────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -202,10 +193,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       file_names: JSON.stringify(req.files.map(f => f.originalname)),
       country_code: geo?.country || null,
       ip_address: ip,
-    });
-    fileTextCache.set(submissionId, {
-      texts: req.files.map(f => ({ name: f.originalname, text: extractText(f.buffer) })),
-      created: Date.now(),
+      extracted_text: req.files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.originalname} ---\n${extractText(f.buffer)}`).join("\n\n"),
     });
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
@@ -336,11 +324,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
 async function triggerReview(transaction) {
   const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
-  const cached = fileTextCache.get(submission.id);
-  const files = cached?.texts || [];
-  const docContext = files.length
-    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n\n")
-    : "[Document text unavailable — files may have expired from cache. Please contact support.]";
+  const docContext = submission.extracted_text || "[Document text unavailable. Please contact support.]";
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -387,7 +371,7 @@ ${docContext}
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 2000,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -418,7 +402,6 @@ ${docContext}
     token: reviewToken,
   });
 
-  fileTextCache.delete(submission.id);
   console.log(`[Review] Completed for submission ${submission.id} — score: ${result.overallScore}`);
   return reviewToken;
 }

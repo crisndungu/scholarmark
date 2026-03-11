@@ -105,6 +105,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         S.submissionId = paymentData.submissionId;
         S.email = paymentData.email;
         S.level = paymentData.level;
+        S.files = Array.from({ length: paymentData.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
 
         // Clean URL
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -456,6 +457,7 @@ async function doPayment() {
       reference: initData.reference,
       email: S.email,
       level: S.level,
+      fileCount: S.files.length,
       timestamp: Date.now()
     };
 
@@ -635,51 +637,64 @@ function renderResults() {
   const r = S.review;
   if (!r) return "<p>No results available.</p>";
   const sc = function (s) { return s >= 70 ? "var(--oxford)" : s >= 50 ? "#a16207" : "#b91c1c"; };
+
+  const strengths = r.strengths || [];
+  const weaknesses = r.criticalWeaknesses || [];
+  const criteria = Object.entries(r.criteriaScores || {});
+  const plan = r.improvementPlan || [];
+  const resources = r.recommendedResources || [];
+
   return `
 <div class="res-scroll">
 <div class="res-score-header">
-<div class="res-score-box"><div class="rsb-n">${r.overallScore}</div><div class="rsb-d">/ 100</div></div>
-<div class="res-info"><h4>${esc(r.grade)}</h4><p>${esc(r.executiveSummary)}</p></div>
+<div class="res-score-box"><div class="rsb-n">${r.overallScore || 0}</div><div class="rsb-d">/ 100</div></div>
+<div class="res-info"><h4>${esc(r.grade || "No Grade")}</h4><p>${esc(r.executiveSummary || "No summary available.")}</p></div>
 </div>
 <div class="res-blk"><div class="res-lbl">Strengths</div>
-<div class="tags-r">${r.strengths.map(function (s) { return `<span class="tg tg-g">✓ ${esc(s)}</span>`; }).join("")}</div>
+<div class="tags-r">${strengths.length ? strengths.map(function (s) { return `<span class="tg tg-g">✓ ${esc(s)}</span>`; }).join("") : "No specific strengths noted."}</div>
 </div>
 <div class="res-blk"><div class="res-lbl">Weaknesses</div>
-<div class="tags-r">${r.criticalWeaknesses.map(function (w) { return `<span class="tg tg-r">✗ ${esc(w)}</span>`; }).join("")}</div>
+<div class="tags-r">${weaknesses.length ? weaknesses.map(function (w) { return `<span class="tg tg-r">✗ ${esc(w)}</span>`; }).join("") : "No specific weaknesses noted."}</div>
 </div>
 <div class="res-blk"><div class="res-lbl">Criteria Scores</div>
 <div class="crit-list">
-${Object.entries(r.criteriaScores).map(function ([n, d]) {
+${criteria.length ? criteria.map(function ([n, d]) {
+    const score = d?.score || 0;
+    const feedback = d?.feedback || "No feedback provided.";
     return `
 <div>
 <div class="crit-row">
-<div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(d.feedback)}</div></div>
-<div class="cr-score" style="color:${sc(d.score)}">${d.score}</div>
+<div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(feedback)}</div></div>
+<div class="cr-score" style="color:${sc(score)}">${score}</div>
 </div>
-<div class="cr-bar"><div class="cr-fill" style="width:${d.score}%;background:${sc(d.score)}"></div></div>
+<div class="cr-bar"><div class="cr-fill" style="width:${score}%;background:${sc(score)}"></div></div>
 </div>`;
-  }).join("")}
+  }).join("") : "Criteria scores unavailable."}
 </div>
 </div>
 <div class="res-blk"><div class="res-lbl">Improvement Plan</div>
 <div class="imp-list">
-${r.improvementPlan.map(function (i) {
+${plan.length ? plan.map(function (i) {
+    const pri = i?.priority || "Low";
     return `
 <div class="imp-item">
-<span class="imp-pri p${i.priority[0]}">${i.priority}</span>
+<span class="imp-pri p${pri[0]}">${esc(pri)}</span>
 <div>
-<div class="imp-area">${esc(i.area)}</div>
-<div class="imp-action">${esc(i.action)} — <em>${esc(i.rationale)}</em></div>
+<div class="imp-area">${esc(i?.area || "General Improvement")}</div>
+<div class="imp-action">${esc(i?.action || "Review work carefully.")} — <em>${esc(i?.rationale || "Necessary for higher marks.")}</em></div>
 </div>
 </div>`;
-  }).join("")}
+  }).join("") : "No specific actions recommended."}
 </div>
 </div>
 <div class="res-blk"><div class="res-lbl">Resubmission Readiness</div>
-<span class="readiness-v">${esc(r.resubmissionReadiness)}</span>
+<span class="readiness-v">${esc(r.resubmissionReadiness || "Incomplete")}</span>
 </div>
 <div class="res-blk"><div class="res-lbl">Reviewer Commentary</div>
-<div class="reviewer-note">${esc(r.reviewerNotes)}</div>
+<div class="reviewer-note">${esc(r.reviewerNotes || "No notes available.")}</div>
+</div>
+<div class="res-blk"><div class="res-lbl">Recommended Resources</div>
+<div class="tags-r" style="margin-top:8px">${resources.length ? resources.map(function (res) { return `<span class="tg tg-g">${esc(res)}</span>`; }).join("") : "Standard academic resources."}</div>
 </div>
 <button class="btn-w" type="button" onclick="downloadReport()" style="margin-top:4px">↓ Download Full Report (PDF)</button>
 <button class="btn-w-outline" type="button" onclick="resetApp()">← Submit Another Document</button>

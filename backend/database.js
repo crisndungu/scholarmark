@@ -32,7 +32,8 @@ async function initSchema() {
       file_names    TEXT NOT NULL,
       country_code  TEXT,
       ip_address    TEXT,
-      status        TEXT DEFAULT 'pending'
+      status        TEXT DEFAULT 'pending',
+      extracted_text TEXT
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -87,9 +88,9 @@ const db_helpers = {
   async createSubmission(data) {
     await db.execute({
       sql: `INSERT INTO submissions
-              (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address)
+              (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address, extracted_text)
             VALUES
-              (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address)`,
+              (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address, :extracted_text)`,
       args: data,
     });
   },
