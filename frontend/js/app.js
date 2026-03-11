@@ -405,14 +405,14 @@ async function doPayment() {
         }
         showErr("Payment was cancelled. Your submission is saved — click Pay to try again.");
       },
-      callback: async (response) => {
+      callback: function (response) {
         // Payment successful — response.reference is the confirmed reference
         console.log("[Payment] Paystack callback — ref:", response.reference);
         S.step = "processing";
         renderWidget();
         // Scroll to the widget so user sees the processing screen
         document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "center" });
-        await verifyPayment(response.reference);
+        verifyPayment(response.reference);
       },
     });
 
