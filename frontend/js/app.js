@@ -87,7 +87,31 @@ function clearFieldError(inputId) {
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  // 🔍 Check if we're returning from Paystack redirect
+  const urlParams = new URLSearchParams(window.location.search);
+  const paystackRef = urlParams.get('reference');
+
+  if (paystackRef && sessionStorage.getItem("scholarmark_payment")) {
+    console.log("[Payment] Resuming after Paystack redirect, ref:", paystackRef);
+    const stored = JSON.parse(sessionStorage.getItem("scholarmark_payment"));
+    S.submissionId = stored.submissionId;
+    S.email = stored.email;
+    S.level = stored.level;
+
+    // Clear the URL params
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    // Show processing state
+    S.step = "processing";
+    renderWidget();
+
+    // Verify payment
+    await verifyPayment(paystackRef);
+    sessionStorage.removeItem("scholarmark_payment");
+    return; // Stop further initialization
+  }
+
   S.prices = {
     "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES", amount: 1500 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
@@ -352,8 +376,10 @@ async function doPayment() {
   S.email = em;
   if (!S.paystackKey) return showErr("Payment system not ready. Please refresh and try again.");
   if (!S.submissionId) return showErr("Session expired. Please start again.");
+
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
+
   try {
     console.log('[Fetch] Initializing payment:', `${API_BASE}/api/payment/init`);
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
@@ -363,10 +389,18 @@ async function doPayment() {
       credentials: 'include'
     });
 
+    // 🔍 Better error handling for non-JSON responses
+    const contentType = initRes.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      const text = await initRes.text();
+      console.error("[Payment/Init] Non-JSON response:", initRes.status, text);
+      throw new Error(`Server returned ${initRes.status}: ${text.slice(0, 200)}`);
+    }
+
     if (!initRes.ok) {
-      const errText = await initRes.text();
-      console.error('[Payment/Init] HTTP Error:', initRes.status, errText);
-      throw new Error(`HTTP ${initRes.status}: ${errText}`);
+      const errData = await initRes.json().catch(() => ({}));
+      console.error('[Payment/Init] HTTP Error:', initRes.status, errData);
+      throw new Error(`HTTP ${initRes.status}: ${errData.error || "Unknown error"}`);
     }
 
     const initData = await initRes.json();
@@ -376,7 +410,7 @@ async function doPayment() {
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
-    // Already paid + review exists — skip Paystack, go straight to results
+    // Already paid + review exists — skip Paystack
     if (initData.alreadyPaid && initData.reviewToken) {
       console.log("[Payment] Already paid, loading existing review");
       if (btn) { btn.disabled = false; }
@@ -386,67 +420,86 @@ async function doPayment() {
       return;
     }
 
-    console.log("[Payment] Init success, access_code:", initData.access_code);
-    console.log("[Payment] authorization_url:", initData.authorization_url);
+    console.log("[Payment] Init success", {
+      access_code: initData.access_code,
+      reference: initData.reference,
+      authorization_url: initData.authorization_url
+    });
 
-    // ── FIX: Use PaystackPop correctly ──────────────────────────────
-    // Check which version of PaystackPop is available
+    // 🔍 Wait for Paystack script to be fully ready
+    await new Promise((resolve, reject) => {
+      if (window.PaystackPop || window._paystackScriptLoaded) {
+        console.log("[Paystack] PaystackPop is available:", window.PaystackPop ? Object.keys(window.PaystackPop) : "script loaded");
+        resolve();
+      } else {
+        console.warn("[Paystack] PaystackPop not found, waiting...");
+        let attempts = 0;
+        const check = setInterval(() => {
+          attempts++;
+          if (window.PaystackPop || window._paystackScriptLoaded) {
+            clearInterval(check);
+            console.log("[Paystack] Paystack loaded after", attempts, "attempts");
+            resolve();
+          } else if (attempts > 20) {
+            clearInterval(check);
+            reject(new Error("Paystack failed to load after 20 attempts"));
+          }
+        }, 250);
+      }
+    });
+
+    // 🔍 Use the most reliable method: REDIRECT FALLBACK
+    if (initData.authorization_url) {
+      console.log("[Payment] Using redirect fallback to:", initData.authorization_url);
+
+      // Store state in sessionStorage so we can resume after redirect
+      sessionStorage.setItem("scholarmark_payment", JSON.stringify({
+        submissionId: S.submissionId,
+        reference: initData.reference,
+        email: S.email,
+        level: S.level
+      }));
+
+      // Redirect to Paystack hosted checkout (most reliable)
+      window.location.href = initData.authorization_url;
+      return;
+    }
+
+    // Fallback to popup only if redirect fails (shouldn't happen)
     if (window.PaystackPop && typeof window.PaystackPop.resumeTransaction === "function") {
-      // Paystack inline v2 — use resumeTransaction with access_code
+      console.log("[Paystack] Using resumeTransaction (v2)");
       window.PaystackPop.resumeTransaction(initData.access_code, {
         onSuccess: async (transaction) => {
-          console.log("[Payment] Paystack success, ref:", transaction?.reference || initData.reference);
+          console.log("[Payment] Paystack success", transaction);
           S.step = "processing";
           renderWidget();
-          await verifyPayment(initData.reference);
+          await verifyPayment(transaction?.reference || initData.reference);
         },
         onCancel: () => {
           showErr("Payment was cancelled. Your submission is saved — you can pay again.");
           if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
         },
       });
-    } else if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
-      // Paystack inline v1 — use setup() with access_code only (no currency field)
-      const handler = window.PaystackPop.setup({
-        key: S.paystackKey,
-        email: S.email,
-        amount: S.prices[S.level]?.minor,
-        // NOTE: Do NOT pass currency — let Paystack use account default
-        // Passing KES on an NGN test account causes silent popup failure
-        ref: initData.reference,
-        onClose: () => {
-          showErr("Payment was cancelled. Your submission is saved — you can pay again.");
-          if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
-        },
-        callback: async (response) => {
-          console.log("[Payment] v1 callback, ref:", response.reference);
-          S.step = "processing";
-          renderWidget();
-          await verifyPayment(response.reference || initData.reference);
-        },
-      });
-      handler.openIframe();
     } else {
-      // Fallback: redirect to Paystack hosted checkout page
-      console.warn("[Payment] PaystackPop not available, redirecting to checkout URL");
-      if (initData.authorization_url) {
-        window.location.href = initData.authorization_url;
-      } else {
-        if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
-        showErr("Paystack popup failed to load. Please refresh the page and try again.");
-      }
+      console.error("[Paystack] No valid payment method available");
+      throw new Error("Paystack popup not available");
     }
+
   } catch (e) {
-    console.error("[Payment] Exception:", {
-      message: e.message,
-      name: e.name,
-      stack: e.stack,
+    // 🔍 Full error details for debugging
+    console.error("[Payment] Full exception details:", {
+      name: e?.name,
+      message: e?.message,
+      stack: e?.stack,
+      toString: e?.toString?.(),
       API_BASE,
       submissionId: S.submissionId,
-      paystackKey: S.paystackKey
+      paystackKey: S.paystackKey ? "present" : "MISSING",
+      PaystackPop: typeof window.PaystackPop
     });
-    showErr("Network error. Details in console. Please check your connection.");
-    if (btn) { btn.disabled = false; }
+
+    showErr("Payment failed. Details in console. Please try again or contact support.");
+    if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
   }
 }
 
@@ -631,7 +684,7 @@ function downloadReport() {
   if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 700); }
 }
 
-// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO ────────────
+// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO (unchanged) ────────────
 function setupNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;
