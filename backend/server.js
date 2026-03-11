@@ -279,7 +279,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     // the account causes "Invalid Amount Sent".
     const paystackPayload = {
       email: submission.email,
-      amount: submission.amount,   // in cents: KES 1500 → 150000
+      amount: parseInt(submission.amount, 10),   // in cents: KES 1500 → 150000, must be an integer
       reference: ref,
       metadata: {
         submission_id: submissionId,
