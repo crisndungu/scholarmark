@@ -229,13 +229,18 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     // ── callback_url tells Paystack where to redirect after payment ──
     // It appends ?reference=<ref>&trxref=<ref> to the URL automatically
     const frontendUrl = process.env.FRONTEND_URL || "https://scholarmark.vercel.app";
+    let finalCallbackUrl = callback_url || frontendUrl;
+    if (submissionId) {
+      const sep = finalCallbackUrl.includes("?") ? "&" : "?";
+      finalCallbackUrl += `${sep}submissionId=${submissionId}`;
+    }
 
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
       currency: "KES",
       reference: ref,
-      callback_url: callback_url || frontendUrl,   // ← Use dynamically sent URL if available
+      callback_url: finalCallbackUrl,   // ← Use dynamically sent URL if available
       metadata: {
         submission_id: submissionId,
         level: submission.level,

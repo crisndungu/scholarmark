@@ -93,15 +93,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   // 🔹 CHECK IF RETURNING FROM PAYSTACK REDIRECT
   const urlParams = new URLSearchParams(window.location.search);
   const paystackRef = urlParams.get('reference');
+  const urlSubId = urlParams.get('submissionId');
 
-  if (paystackRef) {
-    console.log("[Payment] Detected Paystack redirect with ref:", paystackRef);
+  if (paystackRef || urlSubId) {
+    console.log("[Payment] Detected Paystack redirect — ref:", paystackRef, "subId:", urlSubId);
 
     const stored = sessionStorage.getItem("scholarmark_payment") || localStorage.getItem("scholarmark_payment_backup");
-    if (stored || paystackRef) {
+    if (stored || paystackRef || urlSubId) {
       try {
         const paymentData = stored ? JSON.parse(stored) : {};
-        S.submissionId = paymentData.submissionId || null;
+        S.submissionId = paymentData.submissionId || urlSubId || null;
         S.email = paymentData.email || "";
         S.level = paymentData.level || "Level 7";
         S.files = Array.from({ length: paymentData.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
@@ -115,7 +116,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
         // Verify payment and trigger document processing
         // Now verifyPayment will also restore S with real data from DB
-        await verifyPayment(paystackRef);
+        await verifyPayment(S.reference || paystackRef);
 
         // Clear stored data
         sessionStorage.removeItem("scholarmark_payment");
@@ -479,11 +480,14 @@ async function doPayment() {
         access_code: initData.access_code,
         callback: function (response) {
           console.log("[Payment] Paystack callback response:", response);
-          console.log("[Payment] Paystack callback — ref:", response.reference);
+          // 🔹 CRITICAL: Use our custom reference instead of Paystack's T... reference
+          const finalRef = initData.reference || response.reference;
+          console.log("[Payment] Paystack callback — using ref:", finalRef);
+
           setTimeout(function () {
             S.step = "processing";
             renderWidget();
-            verifyPayment(response.reference);
+            verifyPayment(finalRef);
           }, 0);
         },
         onClose: function () {
