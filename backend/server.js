@@ -17,6 +17,8 @@ const geoip = require("geoip-lite");
 const db = require("./database");
 const pricing = require("./pricing");
 
+
+
 // ─── CONFIG VALIDATION ────────────────────────────────────────────
 const FATAL_ENV = ["ANTHROPIC_API_KEY", "SESSION_SECRET"];
 for (const key of FATAL_ENV) {
@@ -33,6 +35,7 @@ for (const key of WARN_ENV) {
 }
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 
 // ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
