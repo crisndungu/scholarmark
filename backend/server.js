@@ -231,13 +231,17 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(400).json({ error: "Already paid. Contact support if your review is missing." });
     }
 
-    // Generate reference BEFORE using it
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
+
+    // ── callback_url tells Paystack where to redirect after payment ──
+    // It appends ?reference=<ref>&trxref=<ref> to the URL automatically
+    const frontendUrl = process.env.FRONTEND_URL || "https://scholarmark.vercel.app";
 
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
       reference: ref,
+      callback_url: frontendUrl,   // ← KEY FIX: Paystack redirects here after success
       metadata: {
         submission_id: submissionId,
         level: submission.level,
@@ -335,8 +339,8 @@ async function triggerReview(transaction) {
   const cached = fileTextCache.get(submission.id);
   const files = cached?.texts || [];
   const docContext = files.length
-    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n")
-    : "[Document text unavailable — files may have expired from cache]";
+    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n\n")
+    : "[Document text unavailable — files may have expired from cache. Please contact support.]";
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -345,33 +349,36 @@ async function triggerReview(transaction) {
   };
   const criteria = levelCriteria[submission.level] || levelCriteria["Level 7"];
   const prompt = `You are a senior academic examiner assessing ${submission.level} work.
-The candidate has submitted ${submission.file_count} document(s). The first is their main submission. Any additional documents are supporting materials.
-Read all documents and provide an honest, rigorous, specific review. Reference the actual content directly.
-Return ONLY valid JSON. No markdown, no preamble.
+The candidate has submitted ${submission.file_count} document(s). The first is their main submission. Any additional documents are supporting materials such as marking guidelines or rubrics.
+Read all documents carefully and provide an honest, rigorous, specific review. Reference the actual content directly — do not give generic feedback.
+Return ONLY valid JSON with no markdown, no code fences, no preamble.
+
 {
-"overallScore": <integer 0-100>,
-"grade": "<Distinction|Merit|Pass|Fail>",
-"executiveSummary": "<2-3 precise sentences directly referencing the work>",
-"strengths": ["<specific strength>","<strength 2>","<strength 3>"],
-"criticalWeaknesses": ["<specific weakness>","<weakness 2>","<weakness 3>"],
-"criteriaScores": {
-${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence>" }`).join(",\n")}
-},
-"improvementPlan": [
-{ "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-{ "priority": "High",   "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-{ "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-{ "priority": "Medium", "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" },
-{ "priority": "Low",    "area": "<area>", "action": "<actionable step>", "rationale": "<rationale>" }
-],
-"recommendedResources": ["<resource 1>","<resource 2>","<resource 3>"],
-"resubmissionReadiness": "<Ready for Submission|Minor Revisions Required|Major Revisions Required|Not Ready for Submission>",
-"reviewerNotes": "<One honest paragraph of final commentary>"
+  "overallScore": <integer 0-100>,
+  "grade": "<Distinction|Merit|Pass|Fail>",
+  "executiveSummary": "<2-3 precise sentences directly referencing the work>",
+  "strengths": ["<specific strength referencing actual content>", "<strength 2>", "<strength 3>"],
+  "criticalWeaknesses": ["<specific weakness referencing actual content>", "<weakness 2>", "<weakness 3>"],
+  "criteriaScores": {
+    ${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence referencing actual content>" }`).join(",\n    ")}
+  },
+  "improvementPlan": [
+    { "priority": "High",   "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
+    { "priority": "High",   "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
+    { "priority": "Medium", "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
+    { "priority": "Medium", "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
+    { "priority": "Low",    "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" }
+  ],
+  "recommendedResources": ["<specific book, journal, or tool>", "<resource 2>", "<resource 3>"],
+  "resubmissionReadiness": "<Ready for Submission|Minor Revisions Required|Major Revisions Required|Not Ready for Submission>",
+  "reviewerNotes": "<One honest paragraph of final commentary directly referencing the work>"
 }
+
 SUBMITTED DOCUMENTS:
 """
 ${docContext}
 """`;
+
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -385,13 +392,23 @@ ${docContext}
       messages: [{ role: "user", content: prompt }],
     }),
   });
+
   if (!anthropicRes.ok) {
     const txt = await anthropicRes.text();
     throw new Error(`Anthropic API error ${anthropicRes.status}: ${txt}`);
   }
+
   const anthropicData = await anthropicRes.json();
   const raw = anthropicData.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
-  const result = JSON.parse(raw);
+
+  let result;
+  try {
+    result = JSON.parse(raw);
+  } catch (parseErr) {
+    console.error("[Review] JSON parse failed. Raw output:", raw.slice(0, 500));
+    throw new Error("AI review returned invalid JSON");
+  }
+
   const reviewToken = crypto.randomBytes(48).toString("hex");
   await db.createReview({
     id: uuidv4(),
@@ -400,8 +417,9 @@ ${docContext}
     result_json: JSON.stringify(result),
     token: reviewToken,
   });
+
   fileTextCache.delete(submission.id);
-  console.log(`[Review] Completed for submission ${submission.id}`);
+  console.log(`[Review] Completed for submission ${submission.id} — score: ${result.overallScore}`);
   return reviewToken;
 }
 
