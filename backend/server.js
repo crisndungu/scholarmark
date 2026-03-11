@@ -71,6 +71,7 @@ app.use(helmet({
 // ─── CORS ─────────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://scholarmark.vercel.app",
+  "https://scholarmark.onrender.com",
   process.env.FRONTEND_URL,
   "http://localhost:3000",
   "http://127.0.0.1:3000",
