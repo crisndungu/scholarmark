@@ -1,27 +1,29 @@
 /**
+ * API base URL — points to the Render backend.
+ * Change this if your backend URL changes.
+ */
+const API_BASE = "https://scholarmark.onrender.com";
+
+/**
  * app.js — ScholarMark Frontend
- *
  * All API keys live on the server. This file only talks to our own backend.
- * Paystack public key is fetched from /api/pubkey on load.
  */
 
-// ─── STATE ────────────────────────────────────────────────────────
 const S = {
-  step: "upload",   // upload | payment | processing | results
+  step: "upload",
   files: [],
   level: "Level 7",
   name: "",
   email: "",
-  currency: "USD",
+  currency: "KES",
   prices: {},
-  country: "US",
+  country: "KE",
   submissionId: null,
   paystackKey: null,
   reviewToken: null,
   review: null,
   progress: 0,
 };
-
 
 const MAX_FILES = 10;
 
@@ -32,8 +34,7 @@ const LEVEL_DATA = {
   "Level 10": { short: "Expert", sub: "Expert & Professorial Practice", criteria: ["Paradigm Contribution", "Global Scholarly Relevance", "Policy Implications", "Pedagogical Value", "Legacy Impact"] },
 };
 
-// ─── VALIDATION HELPERS ───────────────────────────────────────────
-
+// ─── VALIDATION ───────────────────────────────────────────────────
 function validateName(raw) {
   const val = raw.trim();
   if (val.length < 2) return "Please enter your full name or student ID.";
@@ -41,12 +42,8 @@ function validateName(raw) {
     if (val.length < 4) return "Student ID must be at least 4 characters.";
     return null;
   }
-  if (!/^[a-zA-ZÀ-ÿ'\-\. ]+$/.test(val)) {
-    return "Name should only contain letters, hyphens, and apostrophes. No numbers or special characters.";
-  }
-  if ((val.match(/[a-zA-ZÀ-ÿ]/g) || []).length < 2) {
-    return "Please enter a valid name.";
-  }
+  if (!/^[a-zA-ZÀ-ÿ'\-\. ]+$/.test(val)) return "Name should only contain letters, hyphens, and apostrophes.";
+  if ((val.match(/[a-zA-ZÀ-ÿ]/g) || []).length < 2) return "Please enter a valid name.";
   return null;
 }
 
@@ -54,35 +51,23 @@ function validateEmail(raw) {
   const val = raw.trim().toLowerCase();
   if (!val) return "Please enter your email address.";
   if (val.includes(" ")) return "Email address cannot contain spaces.";
-  if ((val.match(/@/g) || []).length !== 1) return "Please enter a valid email address (e.g. name@gmail.com).";
-
+  if ((val.match(/@/g) || []).length !== 1) return "Please enter a valid email address.";
   const [local, domain] = val.split("@");
   if (!local || local.length < 1) return "Please enter a valid email address.";
   if (local.length > 64) return "Email address is too long.";
   if (!/^[a-z0-9._%+\-]+$/.test(local)) return "The part before @ contains invalid characters.";
-  if (local.startsWith(".") || local.endsWith(".")) return "Email address cannot start or end with a dot before the @.";
-  if (!domain) return "Please include the domain (e.g. @gmail.com).";
-  if (!domain.includes(".")) return "Email domain looks incomplete — did you mean @gmail.com or @yahoo.com?";
-
+  if (local.startsWith(".") || local.endsWith(".")) return "Email address cannot start or end with a dot.";
+  if (!domain || !domain.includes(".")) return "Email domain looks incomplete.";
   const domainParts = domain.split(".");
   if (domainParts.some(p => p.length === 0)) return "Please enter a valid email domain.";
-
   const tld = domainParts[domainParts.length - 1];
-  if (tld.length < 2 || tld.length > 10) return "The email domain ending looks incorrect (e.g. .com, .co.ke, .ac.uk).";
+  if (tld.length < 2 || tld.length > 10) return "The email domain ending looks incorrect.";
   if (!/^[a-z0-9.\-]+$/.test(domain)) return "Email domain contains invalid characters.";
-
-  const typos = {
-    "gmial.com": "gmail.com", "gmai.com": "gmail.com", "gamil.com": "gmail.com",
-    "gmail.co": "gmail.com", "gmail.cm": "gmail.com", "yaho.com": "yahoo.com",
-    "yahooo.com": "yahoo.com", "yahoo.co": "yahoo.com", "hotmial.com": "hotmail.com",
-    "hotmail.co": "hotmail.com", "outlok.com": "outlook.com", "outllok.com": "outlook.com",
-  };
-  if (typos[domain]) return `Did you mean @${typos[domain]}? Please check your email address.`;
-
+  const typos = { "gmial.com": "gmail.com", "gmai.com": "gmail.com", "gamil.com": "gmail.com", "gmail.co": "gmail.com", "gmail.cm": "gmail.com", "yaho.com": "yahoo.com", "yahooo.com": "yahoo.com", "hotmial.com": "hotmail.com", "outlok.com": "outlook.com" };
+  if (typos[domain]) return `Did you mean @${typos[domain]}?`;
   return null;
 }
 
-// ─── INLINE FIELD ERROR DISPLAY ──────────────────────────────────
 function setFieldError(inputId, message) {
   const input = document.getElementById(inputId);
   if (!input) return;
@@ -101,7 +86,6 @@ function setFieldError(inputId, message) {
     input.style.boxShadow = "0 0 0 3px rgba(34,197,94,0.1)";
   }
 }
-
 function clearFieldError(inputId) {
   const input = document.getElementById(inputId);
   const errEl = document.getElementById(inputId + "_err");
@@ -112,10 +96,10 @@ function clearFieldError(inputId) {
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   S.prices = {
-    "Level 7": { formatted: "$10", minor: 1000, currency: "USD" },
-    "Level 8": { formatted: "$18", minor: 1800, currency: "USD" },
-    "Level 9": { formatted: "$26", minor: 2600, currency: "USD" },
-    "Level 10": { formatted: "$36", minor: 3600, currency: "USD" },
+    "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES" },
+    "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES" },
+    "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES" },
+    "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES" },
   };
 
   setupNav();
@@ -126,7 +110,6 @@ document.addEventListener("DOMContentLoaded", () => {
   setupHeroParticles();
   setupHeroCardFloat();
   setupHeroCursor();
-
   renderWidget();
 
   loadLocationAndPricing().then(() => {
@@ -136,18 +119,17 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPaystackKey();
 });
 
-// ─── LOAD PAYSTACK KEY FROM SERVER ────────────────────────────────
 async function loadPaystackKey() {
   try {
     const res = await fetch(`${API_BASE}/api/pubkey`);
     const data = await res.json();
     S.paystackKey = data.key;
+    console.log("[Paystack] Key loaded:", S.paystackKey ? "✓" : "✗ MISSING");
   } catch (e) {
     console.error("Could not load payment config:", e);
   }
 }
 
-// ─── LOAD LOCATION & PRICING ──────────────────────────────────────
 async function loadLocationAndPricing() {
   try {
     const res = await fetch(`${API_BASE}/api/location`, {
@@ -163,13 +145,7 @@ async function loadLocationAndPricing() {
       updatePricingUI();
     }
   } catch (e) {
-    console.warn("Location detection failed, using USD fallback");
-    S.prices = {
-      "Level 7": { formatted: "$10", minor: 1000, currency: "USD" },
-      "Level 8": { formatted: "$18", minor: 1800, currency: "USD" },
-      "Level 9": { formatted: "$26", minor: 2600, currency: "USD" },
-      "Level 10": { formatted: "$36", minor: 3600, currency: "USD" },
-    };
+    console.warn("Location detection failed, using KES fallback");
   }
 }
 
@@ -192,7 +168,6 @@ function fileIcon(name) {
   if (ext === "txt") return "📄";
   return "📎";
 }
-
 function inferRole(file, index) {
   if (index === 0) return "Main document";
   const n = file.name.toLowerCase();
@@ -203,25 +178,16 @@ function inferRole(file, index) {
   return "Supporting doc";
 }
 
-// ─── WIDGET RENDER ENGINE ─────────────────────────────────────────
+// ─── WIDGET ───────────────────────────────────────────────────────
 function renderWidget() {
-  const titles = {
-    upload: "Begin Your Submission",
-    payment: "Confirm & Pay",
-    processing: "Reviewing Your Work…",
-    results: "Your Review Report",
-  };
+  const titles = { upload: "Begin Your Submission", payment: "Confirm & Pay", processing: "Reviewing Your Work…", results: "Your Review Report" };
   const el = document.getElementById("widgetTitle");
   if (el) el.textContent = titles[S.step];
-
   syncDots();
-
   const body = document.getElementById("widgetBody");
   if (!body) return;
-
   const renders = { upload: renderUpload, payment: renderPayment, processing: renderProcessing, results: renderResults };
   body.innerHTML = renders[S.step]();
-
   if (S.step === "upload") bindUpload();
   if (S.step === "results") updatePricingUI();
 }
@@ -235,24 +201,20 @@ function syncDots() {
   });
 }
 
-// ─── UPLOAD VIEW ──────────────────────────────────────────────────
+// ─── UPLOAD ───────────────────────────────────────────────────────
 function renderUpload() {
   const priceForLevel = S.prices[S.level]?.formatted || "…";
   return `
 <div class="err-box" id="errBox"></div>
 <div class="f">
   <label for="nameIn">Your Full Name or Student ID</label>
-  <input id="nameIn" type="text"
-    placeholder="e.g. Jane Mwangi  or  STU-2024-001"
-    value="${esc(S.name)}"
-    autocomplete="name"
-    maxlength="200"
-    oninput="liveValidateName(this)"
-    onblur="liveValidateName(this)" />
+  <input id="nameIn" type="text" placeholder="e.g. Jane Mwangi  or  STU-2024-001"
+    value="${esc(S.name)}" autocomplete="name" maxlength="200"
+    oninput="liveValidateName(this)" onblur="liveValidateName(this)" />
   <div class="field-hint">Letters, hyphens and apostrophes only — or your student ID</div>
 </div>
 <div class="f">
-  <label>Academic Level <span class="field-note">— price shown in your local currency</span></label>
+  <label>Academic Level <span class="field-note">— price shown in KES</span></label>
   <div class="lvl-grid">
     ${Object.keys(LEVEL_DATA).map(k => `
     <div class="lvl-opt${S.level === k ? " sel" : ""}" data-level="${k}"
@@ -296,16 +258,8 @@ function renderUpload() {
 </button>`;
 }
 
-// ─── LIVE VALIDATION ─────────────────────────────────────────────
-function liveValidateName(input) {
-  const err = validateName(input.value);
-  setFieldError("nameIn", err);
-}
-
-function liveValidateEmail(input) {
-  const err = validateEmail(input.value);
-  setFieldError("emailIn", err);
-}
+function liveValidateName(input) { setFieldError("nameIn", validateName(input.value)); }
+function liveValidateEmail(input) { setFieldError("emailIn", validateEmail(input.value)); }
 
 function bindUpload() {
   const fi = document.getElementById("fi");
@@ -319,8 +273,6 @@ function bindUpload() {
 }
 
 function addFiles(newFiles) {
-  // Persist whatever the user has typed before re-rendering
-  S.name = document.getElementById("nameIn")?.value.trim() || S.name;
   for (const f of newFiles) {
     if (S.files.length >= MAX_FILES) { showErr(`Maximum ${MAX_FILES} files allowed.`); break; }
     if (f.size > 10 * 1024 * 1024) { showErr(`"${f.name}" exceeds 10MB.`); continue; }
@@ -331,17 +283,8 @@ function addFiles(newFiles) {
   renderWidget();
 }
 
-function removeFile(idx) {
-  S.name = document.getElementById("nameIn")?.value.trim() || S.name;
-  S.files.splice(idx, 1);
-  renderWidget();
-}
-
-function pickLevel(lv) {
-  S.name = document.getElementById("nameIn")?.value.trim() || S.name;
-  S.level = lv;
-  renderWidget();
-}
+function removeFile(idx) { S.files.splice(idx, 1); renderWidget(); }
+function pickLevel(lv) { S.level = lv; renderWidget(); }
 
 async function toPayment() {
   const nm = document.getElementById("nameIn")?.value.trim();
@@ -356,7 +299,7 @@ async function toPayment() {
   try {
     const form = new FormData();
     form.append("name", S.name);
-    form.append("email", S.email || "pending@scholarmark.co");
+    form.append("email", S.email || "pending@scholarmark.co.ke");
     form.append("level", S.level);
     form.append("currency", S.currency);
     S.files.forEach(f => form.append("files", f));
@@ -376,7 +319,7 @@ async function toPayment() {
   }
 }
 
-// ─── PAYMENT VIEW ─────────────────────────────────────────────────
+// ─── PAYMENT ──────────────────────────────────────────────────────
 function renderPayment() {
   const price = S.prices[S.level];
   const lv = LEVEL_DATA[S.level];
@@ -385,18 +328,14 @@ function renderPayment() {
 <div class="pay-sum">
   <div class="ps-row"><span class="ps-l">Service</span><span class="ps-v">Level ${S.level.split(" ")[1]} — ${lv.short}</span></div>
   <div class="ps-row"><span class="ps-l">Files submitted</span><span class="ps-v">${S.files.length} document${S.files.length !== 1 ? "s" : ""}</span></div>
-  <div class="ps-row"><span class="ps-l">Currency</span><span class="ps-v">${S.currency} — auto-detected from your location</span></div>
+  <div class="ps-row"><span class="ps-l">Currency</span><span class="ps-v">KES — Kenyan Shillings</span></div>
   <div class="ps-row total-row"><span class="ps-l">Total</span><span class="ps-total">${price?.formatted || "…"}</span></div>
 </div>
 <div class="f">
   <label for="emailIn">Email address <span class="field-note">— for your receipt &amp; report access</span></label>
-  <input id="emailIn" type="email"
-    placeholder="e.g. name@gmail.com"
-    value="${esc(S.email)}"
-    autocomplete="email"
-    maxlength="254"
-    oninput="liveValidateEmail(this)"
-    onblur="liveValidateEmail(this)" />
+  <input id="emailIn" type="email" placeholder="e.g. name@gmail.com"
+    value="${esc(S.email)}" autocomplete="email" maxlength="254"
+    oninput="liveValidateEmail(this)" onblur="liveValidateEmail(this)" />
   <div class="field-hint">We accept all providers — Gmail, Yahoo, Outlook, iCloud, and more</div>
 </div>
 <p class="pay-note">🔒 Secured by Paystack · M-Pesa, Visa, Mastercard &amp; Bank Transfer · Documents deleted after review</p>
@@ -427,29 +366,66 @@ async function doPayment() {
     const initData = await initRes.json();
 
     if (!initRes.ok || !initData.success) {
+      if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
-    if (!window.PaystackPop) return showErr("Paystack failed to load. Please refresh.");
+    console.log("[Payment] Init success, access_code:", initData.access_code);
 
-    window.PaystackPop.resumeTransaction(initData.access_code, {
-      onSuccess: async () => {
-        S.step = "processing";
-        renderWidget();
-        await verifyPayment(initData.reference);
-      },
-      onCancel: () => {
-        showErr("Payment was cancelled. Your submission is saved — you can pay again.");
+    // ── FIX: Use PaystackPop correctly ──────────────────────────────
+    // Check which version of PaystackPop is available
+    if (window.PaystackPop && typeof window.PaystackPop.resumeTransaction === "function") {
+      // Paystack inline v2 — use resumeTransaction with access_code
+      window.PaystackPop.resumeTransaction(initData.access_code, {
+        onSuccess: async (transaction) => {
+          console.log("[Payment] Paystack success, ref:", transaction?.reference || initData.reference);
+          S.step = "processing";
+          renderWidget();
+          await verifyPayment(initData.reference);
+        },
+        onCancel: () => {
+          showErr("Payment was cancelled. Your submission is saved — you can pay again.");
+          if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
+        },
+      });
+    } else if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
+      // Paystack inline v1 — use setup() instead
+      const handler = window.PaystackPop.setup({
+        key: S.paystackKey,
+        email: S.email,
+        amount: S.prices[S.level]?.minor,
+        currency: S.currency,
+        ref: initData.reference,
+        onClose: () => {
+          showErr("Payment was cancelled. Your submission is saved — you can pay again.");
+          if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
+        },
+        callback: async (response) => {
+          console.log("[Payment] v1 callback, ref:", response.reference);
+          S.step = "processing";
+          renderWidget();
+          await verifyPayment(response.reference || initData.reference);
+        },
+      });
+      handler.openIframe();
+    } else {
+      // Fallback: redirect to Paystack hosted checkout page
+      console.warn("[Payment] PaystackPop not available, redirecting to checkout URL");
+      if (initData.authorization_url) {
+        window.location.href = initData.authorization_url;
+      } else {
         if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
-      },
-    });
+        showErr("Paystack popup failed to load. Please refresh the page and try again.");
+      }
+    }
   } catch (e) {
+    console.error("[Payment] Exception:", e);
     showErr("Network error. Please check your connection.");
     if (btn) { btn.disabled = false; }
   }
 }
 
-// ─── PROCESSING VIEW ──────────────────────────────────────────────
+// ─── PROCESSING ───────────────────────────────────────────────────
 function renderProcessing() {
   const stages = [
     [5, "Receiving your submission"],
@@ -475,7 +451,6 @@ function renderProcessing() {
 </div>`;
 }
 
-// ─── VERIFY PAYMENT ───────────────────────────────────────────────
 async function verifyPayment(reference) {
   S.progress = 8;
   const iv = setInterval(() => {
@@ -490,7 +465,6 @@ async function verifyPayment(reference) {
       body: JSON.stringify({ reference }),
     });
     const data = await res.json();
-
     clearInterval(iv);
 
     if (!res.ok || !data.success) {
@@ -536,7 +510,7 @@ function updateProgress() {
   });
 }
 
-// ─── RESULTS VIEW ─────────────────────────────────────────────────
+// ─── RESULTS ──────────────────────────────────────────────────────
 function renderResults() {
   const r = S.review;
   if (!r) return "<p>No results available.</p>";
@@ -544,14 +518,8 @@ function renderResults() {
   return `
 <div class="res-scroll">
   <div class="res-score-header">
-    <div class="res-score-box">
-      <div class="rsb-n">${r.overallScore}</div>
-      <div class="rsb-d">/ 100</div>
-    </div>
-    <div class="res-info">
-      <h4>${esc(r.grade)}</h4>
-      <p>${esc(r.executiveSummary)}</p>
-    </div>
+    <div class="res-score-box"><div class="rsb-n">${r.overallScore}</div><div class="rsb-d">/ 100</div></div>
+    <div class="res-info"><h4>${esc(r.grade)}</h4><p>${esc(r.executiveSummary)}</p></div>
   </div>
   <div class="res-blk"><div class="res-lbl">Strengths</div>
     <div class="tags-r">${r.strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("")}</div>
@@ -589,14 +557,11 @@ function renderResults() {
   <div class="res-blk"><div class="res-lbl">Reviewer Commentary</div>
     <div class="reviewer-note">${esc(r.reviewerNotes)}</div>
   </div>
-  <button class="btn-w" type="button" onclick="downloadReport()" style="margin-top:4px">
-    ↓ Download Full Report (PDF)
-  </button>
+  <button class="btn-w" type="button" onclick="downloadReport()" style="margin-top:4px">↓ Download Full Report (PDF)</button>
   <button class="btn-w-outline" type="button" onclick="resetApp()">← Submit Another Document</button>
 </div>`;
 }
 
-// ─── RESET ────────────────────────────────────────────────────────
 function resetApp() {
   S.step = "upload"; S.files = []; S.name = ""; S.email = "";
   S.submissionId = null; S.reviewToken = null; S.review = null; S.progress = 0;
@@ -609,132 +574,48 @@ function downloadReport() {
   if (!r) return;
   const sc = s => s >= 70 ? "#1d4ed8" : s >= 50 ? "#a16207" : "#b91c1c";
   const sf = s => s >= 70 ? "#deedf9" : s >= 50 ? "#fef9c3" : "#fee2e2";
-
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>ScholarMark Report — ${esc(S.name)}</title>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>ScholarMark Report — ${esc(S.name)}</title>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Outfit',sans-serif;background:#fff;color:#1a1a1a;font-size:10.5pt;line-height:1.65}
-.cover{background:#002147;color:#f5f5f5;padding:52px 48px;position:relative;overflow:hidden}
-.cover::after{content:'';position:absolute;top:-30%;right:-5%;width:400px;height:400px;border-radius:50%;background:radial-gradient(circle,rgba(185,214,242,0.08),transparent 70%)}
-.c-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px}
-.c-brand{font-family:'EB Garamond',serif;font-size:1.1rem;color:rgba(185,214,242,0.5)}
-.c-badge{font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.18em;text-transform:uppercase;color:rgba(185,214,242,0.3);background:rgba(185,214,242,0.07);border:1px solid rgba(185,214,242,0.12);padding:4px 10px;border-radius:2px}
-h1{font-family:'EB Garamond',serif;font-size:26pt;font-weight:400;line-height:1.1;color:white;margin-bottom:6px}
-h1 em{font-style:italic;color:#b9d6f2}
-.c-sub{font-family:'JetBrains Mono',monospace;font-size:7pt;color:rgba(185,214,242,0.3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:32px}
-.meta{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.mi{border-top:1px solid rgba(185,214,242,0.1);padding-top:11px}
-.mi label{font-family:'JetBrains Mono',monospace;font-size:6pt;text-transform:uppercase;letter-spacing:0.18em;opacity:0.35;display:block;margin-bottom:3px}
-.mi value{font-size:9.5pt;font-weight:500;display:block;color:#e8f2fb}
-.sb{display:flex;align-items:center;gap:22px;padding:22px 48px;background:#f0f7fd;border-bottom:2px solid #deedf9}
-.ss{width:76px;height:76px;border:2px solid #002147;background:${sf(r.overallScore)};display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}
-.sn{font-family:'EB Garamond',serif;font-size:24pt;color:${sc(r.overallScore)};line-height:1}
-.sd{font-family:'JetBrains Mono',monospace;font-size:6.5pt;color:#8a8680}
-.si h2{font-family:'EB Garamond',serif;font-size:16pt;color:#002147;font-style:italic;margin-bottom:5px}
-.si p{font-size:8.5pt;color:#555;line-height:1.7;max-width:500px}
-.sec{padding:20px 48px;border-bottom:1px solid #e8e4df}
-.sec h3{font-family:'EB Garamond',serif;font-size:11pt;color:#002147;font-style:italic;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-.sec h3::after{content:'';flex:1;height:1px;background:#e8e4df}
-.tags{display:flex;flex-wrap:wrap;gap:6px}
-.tg{padding:3px 9px;border-radius:100px;font-size:7.5pt}
-.tg-g{background:#dcfce7;color:#15803d;border:1px solid #86efac}
-.tg-r{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}
-.cg{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.ci{border:1px solid #e8e4df;padding:11px;border-radius:3px}
-.cn{font-family:'JetBrains Mono',monospace;font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#8a8680;margin-bottom:2px}
-.cs{font-family:'EB Garamond',serif;font-size:17pt;color:${sc(r.overallScore)};line-height:1}
-.bar{height:2px;background:#e8e4df;border-radius:1px;margin:4px 0}
-.bf{height:2px;border-radius:1px}
-.cf{font-size:8pt;color:#555;line-height:1.55}
-table{width:100%;border-collapse:collapse}
-th{background:#002147;color:#f0f7fd;padding:7px 11px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em;text-transform:uppercase}
-td{padding:8px 11px;border-bottom:1px solid #f0f0ec;font-size:8.5pt;vertical-align:top}
-tr:nth-child(even) td{background:#fafaf8}
-.pb{padding:2px 6px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;font-weight:700}
-.pH{background:#fee2e2;color:#b91c1c}.pM{background:#fef9c3;color:#a16207}.pL{background:#dcfce7;color:#15803d}
-.rb{display:inline-block;background:#deedf9;border:1px solid #b9d6f2;color:#002147;padding:5px 14px;border-radius:3px;font-size:9pt;font-weight:500}
-.note{border-left:3px solid #002147;padding:13px 16px;background:#f0f7fd;font-family:'EB Garamond',serif;font-style:italic;color:#2c2c2c;line-height:1.8;font-size:9.5pt}
-ul.rl{list-style:none}
-ul.rl li{padding:6px 11px 6px 22px;background:#fafaf8;border-radius:2px;font-size:8.5pt;color:#555;position:relative;margin-bottom:4px}
-ul.rl li::before{content:"→";position:absolute;left:7px;color:#002147}
-.footer{background:#002147;color:rgba(185,214,242,0.2);text-align:center;padding:11px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em}
-@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
-</style></head><body>
-<div class="cover">
-  <div class="c-top"><div class="c-brand">ScholarMark</div><div class="c-badge">Academic Review Report</div></div>
-  <h1>Academic Review &<br/><em>Improvement Report</em></h1>
-  <div class="c-sub">Confidential · For academic improvement purposes only</div>
-  <div class="meta">
-    <div class="mi"><label>Author</label><value>${esc(S.name || "—")}</value></div>
-    <div class="mi"><label>Documents submitted</label><value>${S.files.length} file${S.files.length !== 1 ? "s" : ""}</value></div>
-    <div class="mi"><label>Academic Level</label><value>${esc(S.level)} — ${esc(LEVEL_DATA[S.level]?.sub || "")}</value></div>
-    <div class="mi"><label>Date</label><value>${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</value></div>
-  </div>
-</div>
-<div class="sb">
-  <div class="ss"><span class="sn">${r.overallScore}</span><span class="sd">/ 100</span></div>
-  <div class="si"><h2>${esc(r.grade)}</h2><p>${esc(r.executiveSummary)}</p></div>
-</div>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Outfit',sans-serif;background:#fff;color:#1a1a1a;font-size:10.5pt;line-height:1.65}.cover{background:#002147;color:#f5f5f5;padding:52px 48px;position:relative;overflow:hidden}.c-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px}.c-brand{font-family:'EB Garamond',serif;font-size:1.1rem;color:rgba(185,214,242,0.5)}.c-badge{font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.18em;text-transform:uppercase;color:rgba(185,214,242,0.3);background:rgba(185,214,242,0.07);border:1px solid rgba(185,214,242,0.12);padding:4px 10px;border-radius:2px}h1{font-family:'EB Garamond',serif;font-size:26pt;font-weight:400;line-height:1.1;color:white;margin-bottom:6px}h1 em{font-style:italic;color:#b9d6f2}.c-sub{font-family:'JetBrains Mono',monospace;font-size:7pt;color:rgba(185,214,242,0.3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:32px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:14px}.mi{border-top:1px solid rgba(185,214,242,0.1);padding-top:11px}.mi label{font-family:'JetBrains Mono',monospace;font-size:6pt;text-transform:uppercase;letter-spacing:0.18em;opacity:0.35;display:block;margin-bottom:3px}.mi value{font-size:9.5pt;font-weight:500;display:block;color:#e8f2fb}.sb{display:flex;align-items:center;gap:22px;padding:22px 48px;background:#f0f7fd;border-bottom:2px solid #deedf9}.ss{width:76px;height:76px;border:2px solid #002147;background:${sf(r.overallScore)};display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}.sn{font-family:'EB Garamond',serif;font-size:24pt;color:${sc(r.overallScore)};line-height:1}.sd{font-family:'JetBrains Mono',monospace;font-size:6.5pt;color:#8a8680}.si h2{font-family:'EB Garamond',serif;font-size:16pt;color:#002147;font-style:italic;margin-bottom:5px}.si p{font-size:8.5pt;color:#555;line-height:1.7;max-width:500px}.sec{padding:20px 48px;border-bottom:1px solid #e8e4df}.sec h3{font-family:'EB Garamond',serif;font-size:11pt;color:#002147;font-style:italic;margin-bottom:10px;display:flex;align-items:center;gap:8px}.sec h3::after{content:'';flex:1;height:1px;background:#e8e4df}.tags{display:flex;flex-wrap:wrap;gap:6px}.tg{padding:3px 9px;border-radius:100px;font-size:7.5pt}.tg-g{background:#dcfce7;color:#15803d;border:1px solid #86efac}.tg-r{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}.cg{display:grid;grid-template-columns:1fr 1fr;gap:9px}.ci{border:1px solid #e8e4df;padding:11px;border-radius:3px}.cn{font-family:'JetBrains Mono',monospace;font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#8a8680;margin-bottom:2px}.cs{font-family:'EB Garamond',serif;font-size:17pt;color:${sc(r.overallScore)};line-height:1}.bar{height:2px;background:#e8e4df;border-radius:1px;margin:4px 0}.bf{height:2px;border-radius:1px}.cf{font-size:8pt;color:#555;line-height:1.55}table{width:100%;border-collapse:collapse}th{background:#002147;color:#f0f7fd;padding:7px 11px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em;text-transform:uppercase}td{padding:8px 11px;border-bottom:1px solid #f0f0ec;font-size:8.5pt;vertical-align:top}tr:nth-child(even) td{background:#fafaf8}.pb{padding:2px 6px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;font-weight:700}.pH{background:#fee2e2;color:#b91c1c}.pM{background:#fef9c3;color:#a16207}.pL{background:#dcfce7;color:#15803d}.rb{display:inline-block;background:#deedf9;border:1px solid #b9d6f2;color:#002147;padding:5px 14px;border-radius:3px;font-size:9pt;font-weight:500}.note{border-left:3px solid #002147;padding:13px 16px;background:#f0f7fd;font-family:'EB Garamond',serif;font-style:italic;color:#2c2c2c;line-height:1.8;font-size:9.5pt}ul.rl{list-style:none}ul.rl li{padding:6px 11px 6px 22px;background:#fafaf8;border-radius:2px;font-size:8.5pt;color:#555;position:relative;margin-bottom:4px}ul.rl li::before{content:"→";position:absolute;left:7px;color:#002147}.footer{background:#002147;color:rgba(185,214,242,0.2);text-align:center;padding:11px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+<div class="cover"><div class="c-top"><div class="c-brand">ScholarMark</div><div class="c-badge">Academic Review Report</div></div><h1>Academic Review &<br/><em>Improvement Report</em></h1><div class="c-sub">Confidential · For academic improvement purposes only</div><div class="meta"><div class="mi"><label>Author</label><value>${esc(S.name || "—")}</value></div><div class="mi"><label>Documents submitted</label><value>${S.files.length} file${S.files.length !== 1 ? "s" : ""}</value></div><div class="mi"><label>Academic Level</label><value>${esc(S.level)} — ${esc(LEVEL_DATA[S.level]?.sub || "")}</value></div><div class="mi"><label>Date</label><value>${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</value></div></div></div>
+<div class="sb"><div class="ss"><span class="sn">${r.overallScore}</span><span class="sd">/ 100</span></div><div class="si"><h2>${esc(r.grade)}</h2><p>${esc(r.executiveSummary)}</p></div></div>
 <div class="sec"><h3>Strengths</h3><div class="tags">${r.strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("")}</div></div>
 <div class="sec"><h3>Critical Weaknesses</h3><div class="tags">${r.criticalWeaknesses.map(w => `<span class="tg tg-r">✗ ${esc(w)}</span>`).join("")}</div></div>
-<div class="sec"><h3>Assessment Criteria</h3><div class="cg">
-${Object.entries(r.criteriaScores).map(([n, d]) => `<div class="ci"><div class="cn">${esc(n)}</div><div class="cs" style="color:${sc(d.score)}">${d.score}</div><div class="bar"><div class="bf" style="width:${d.score}%;background:${sc(d.score)}"></div></div><div class="cf">${esc(d.feedback)}</div></div>`).join("")}
-</div></div>
-<div class="sec"><h3>Improvement Action Plan</h3>
-<table><thead><tr><th>Priority</th><th>Area</th><th>Recommended Action</th><th>Rationale</th></tr></thead>
-<tbody>${r.improvementPlan.map(i => `<tr><td><span class="pb p${i.priority[0]}">${esc(i.priority)}</span></td><td><strong>${esc(i.area)}</strong></td><td>${esc(i.action)}</td><td>${esc(i.rationale)}</td></tr>`).join("")}</tbody></table>
-</div>
+<div class="sec"><h3>Assessment Criteria</h3><div class="cg">${Object.entries(r.criteriaScores).map(([n, d]) => `<div class="ci"><div class="cn">${esc(n)}</div><div class="cs" style="color:${sc(d.score)}">${d.score}</div><div class="bar"><div class="bf" style="width:${d.score}%;background:${sc(d.score)}"></div></div><div class="cf">${esc(d.feedback)}</div></div>`).join("")}</div></div>
+<div class="sec"><h3>Improvement Action Plan</h3><table><thead><tr><th>Priority</th><th>Area</th><th>Recommended Action</th><th>Rationale</th></tr></thead><tbody>${r.improvementPlan.map(i => `<tr><td><span class="pb p${i.priority[0]}">${esc(i.priority)}</span></td><td><strong>${esc(i.area)}</strong></td><td>${esc(i.action)}</td><td>${esc(i.rationale)}</td></tr>`).join("")}</tbody></table></div>
 <div class="sec"><h3>Recommended Resources</h3><ul class="rl">${r.recommendedResources.map(x => `<li>${esc(x)}</li>`).join("")}</ul></div>
 <div class="sec"><h3>Resubmission Readiness</h3><span class="rb">${esc(r.resubmissionReadiness)}</span></div>
 <div class="sec"><h3>Reviewer's Final Commentary</h3><div class="note">${esc(r.reviewerNotes)}</div></div>
 <div class="footer">ScholarMark Academic Review · Confidential · © ${new Date().getFullYear()}</div>
 </body></html>`;
-
   const w = window.open("", "_blank");
   if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 700); }
 }
 
-// ─── NAV ──────────────────────────────────────────────────────────
+// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO (unchanged) ────────────
 function setupNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;
   window.addEventListener("scroll", () => nav.classList.toggle("scrolled", scrollY > 50), { passive: true });
 }
-
-// ─── FAQ ──────────────────────────────────────────────────────────
 function setupFAQ() {
   document.querySelectorAll(".faq-q").forEach(q => {
     const toggle = () => {
       const item = q.parentElement, open = item.classList.contains("open");
-      document.querySelectorAll(".faq-item.open").forEach(x => {
-        x.classList.remove("open");
-        x.querySelector(".faq-q")?.setAttribute("aria-expanded", "false");
-      });
+      document.querySelectorAll(".faq-item.open").forEach(x => { x.classList.remove("open"); x.querySelector(".faq-q")?.setAttribute("aria-expanded", "false"); });
       if (!open) { item.classList.add("open"); q.setAttribute("aria-expanded", "true"); }
     };
     q.addEventListener("click", toggle);
     q.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
   });
 }
-
-// ─── MARQUEE ──────────────────────────────────────────────────────
 function setupMarquee() {
   const track = document.getElementById("stripTrack");
   if (!track) return;
-  const items = [
-    "Master's Dissertations", "Doctoral Theses", "Research Papers", "Post-Doctoral Work",
-    "Up to 10 Documents", "Marking Guidelines Accepted", "Structured Written Feedback",
-    "Secure Submission", "Location-Based Pricing", "Level 7 to Level 10",
-  ];
-  const content = [...items, ...items]
-    .map(t => `<span class="strip-item">${t}<span class="strip-sep">◆</span></span>`)
-    .join("");
+  const items = ["Master's Dissertations", "Doctoral Theses", "Research Papers", "Post-Doctoral Work", "Up to 10 Documents", "Marking Guidelines Accepted", "Structured Written Feedback", "Secure Submission", "KES Pricing", "Level 7 to Level 10"];
+  const content = [...items, ...items].map(t => `<span class="strip-item">${t}<span class="strip-sep">◆</span></span>`).join("");
   track.innerHTML = content + content;
 }
-
-// ─── COUNTERS ─────────────────────────────────────────────────────
 function setupCounters() {
   const co = new IntersectionObserver(entries => {
     entries.forEach(e => {
@@ -753,88 +634,48 @@ function setupCounters() {
   }, { threshold: 0.5 });
   document.querySelectorAll("[data-count]").forEach(el => co.observe(el));
 }
-
-// ─── HERO: CURSOR-TRACKING GLOW ──────────────────────────────────
 function setupHeroCursor() {
-  const hero = document.getElementById("hero");
-  const cursor = document.getElementById("heroCursor");
+  const hero = document.getElementById("hero"), cursor = document.getElementById("heroCursor");
   if (!hero || !cursor) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-  hero.addEventListener("mousemove", e => {
-    const rect = hero.getBoundingClientRect();
-    cursor.style.left = (e.clientX - rect.left) + "px";
-    cursor.style.top = (e.clientY - rect.top) + "px";
-  });
+  hero.addEventListener("mousemove", e => { const r = hero.getBoundingClientRect(); cursor.style.left = (e.clientX - r.left) + "px"; cursor.style.top = (e.clientY - r.top) + "px"; });
 }
-
-// ─── HERO: FLOATING PARTICLES ─────────────────────────────────────
 function setupHeroParticles() {
   const hero = document.getElementById("hero");
   if (!hero) return;
-
   const canvas = document.createElement("canvas");
   canvas.setAttribute("aria-hidden", "true");
   canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:0.6;";
   hero.insertBefore(canvas, hero.firstChild);
-
   const ctx = canvas.getContext("2d");
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-
-  const PARTICLE_COUNT = 55;
-  let particles = [], W, H, animId;
-
-  function resize() {
-    const rect = hero.getBoundingClientRect();
-    W = canvas.width = rect.width;
-    H = canvas.height = rect.height;
-  }
-
-  function createParticle(randomY = false) {
-    const size = Math.random() * 2.2 + 0.6;
-    return {
-      x: Math.random() * W, y: randomY ? Math.random() * H : H + 10, size,
-      speedY: Math.random() * 0.35 + 0.12, speedX: (Math.random() - 0.5) * 0.18,
-      opacity: Math.random() * 0.5 + 0.15, fade: Math.random() > 0.5 ? 0.003 : -0.003,
-      hue: Math.random() * 20 + 200, sat: Math.floor(Math.random() * 30 + 60), lit: Math.floor(Math.random() * 20 + 70),
-    };
-  }
-
-  function init() { resize(); particles = Array.from({ length: PARTICLE_COUNT }, () => createParticle(true)); }
-
+  const N = 55; let particles = [], W, H, animId;
+  function resize() { const r = hero.getBoundingClientRect(); W = canvas.width = r.width; H = canvas.height = r.height; }
+  function mkP(ry) { const s = Math.random() * 2.2 + 0.6; return { x: Math.random() * W, y: ry ? Math.random() * H : H + 10, size: s, speedY: Math.random() * 0.35 + 0.12, speedX: (Math.random() - 0.5) * 0.18, opacity: Math.random() * 0.5 + 0.15, fade: Math.random() > 0.5 ? 0.003 : -0.003, hue: Math.random() * 20 + 200, sat: Math.floor(Math.random() * 30 + 60), lit: Math.floor(Math.random() * 20 + 70) }; }
+  function init() { resize(); particles = Array.from({ length: N }, () => mkP(true)); }
   function draw() {
     ctx.clearRect(0, 0, W, H);
     for (const p of particles) {
       p.x += p.speedX; p.y -= p.speedY; p.opacity += p.fade;
       if (p.opacity >= 0.65 || p.opacity <= 0.08) p.fade *= -1;
-      if (p.y < -10) Object.assign(p, createParticle(false));
-      const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.5);
-      grad.addColorStop(0, `hsla(${p.hue},${p.sat}%,${p.lit}%,${p.opacity})`);
-      grad.addColorStop(1, `hsla(${p.hue},${p.sat}%,${p.lit}%,0)`);
-      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2);
-      ctx.fillStyle = grad; ctx.fill();
+      if (p.y < -10) Object.assign(p, mkP(false));
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 2.5);
+      g.addColorStop(0, `hsla(${p.hue},${p.sat}%,${p.lit}%,${p.opacity})`);
+      g.addColorStop(1, `hsla(${p.hue},${p.sat}%,${p.lit}%,0)`);
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.size * 2.5, 0, Math.PI * 2); ctx.fillStyle = g; ctx.fill();
     }
     animId = requestAnimationFrame(draw);
   }
-
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) cancelAnimationFrame(animId);
-    else animId = requestAnimationFrame(draw);
-  });
-
-  let resizeTimer;
-  window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 150); });
-
+  document.addEventListener("visibilitychange", () => { if (document.hidden) cancelAnimationFrame(animId); else animId = requestAnimationFrame(draw); });
+  let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => resize(), 150); });
   init(); draw();
 }
-
-// ─── HERO: CARD FLOAT + BAR FILL ─────────────────────────────────
 function setupHeroCardFloat() {
   const card = document.querySelector(".hero-card");
   if (!card) return;
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { fillHeroBars(0); return; }
   setTimeout(() => { card.classList.add("loaded"); fillHeroBars(300); }, 2200);
 }
-
 function fillHeroBars(extraDelay) {
   document.querySelectorAll(".hc-bar-f").forEach((bar, i) => {
     const target = bar.style.width || "70%";
@@ -843,23 +684,17 @@ function fillHeroBars(extraDelay) {
     setTimeout(() => bar.classList.add("animated"), extraDelay + i * 180);
   });
 }
-
-// ─── SCROLL REVEAL ────────────────────────────────────────────────
 function setupReveal() {
   const ro = new IntersectionObserver((entries) => {
-    entries.forEach((e, i) => {
-      if (e.isIntersecting) { setTimeout(() => e.target.classList.add("in"), i * 70); ro.unobserve(e.target); }
-    });
+    entries.forEach((e, i) => { if (e.isIntersecting) { setTimeout(() => e.target.classList.add("in"), i * 70); ro.unobserve(e.target); } });
   }, { threshold: 0.1 });
   document.querySelectorAll(".reveal").forEach(el => ro.observe(el));
 }
 
-// ─── UTILS ────────────────────────────────────────────────────────
 function esc(s) {
   if (typeof s !== "string") return String(s ?? "");
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-
 function showErr(msg) {
   const el = document.getElementById("errBox");
   if (!el) return;
@@ -868,7 +703,6 @@ function showErr(msg) {
   setTimeout(() => el.classList.remove("show"), 7000);
 }
 
-// ─── GLOBAL HELPERS ───────────────────────────────────────────────
 window.pickLevel = pickLevel;
 window.removeFile = removeFile;
 window.toPayment = toPayment;
