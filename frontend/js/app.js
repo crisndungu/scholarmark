@@ -1,6 +1,9 @@
 /**
- * app.js — ScholarMark Frontend
+ * app.js — ScholarMark Frontend (FULLY FIXED)
+ * API_BASE is defined in config.js (loaded first in index.html)
  */
+
+// Global state object
 const S = {
   step: "upload",
   files: [],
@@ -87,32 +90,43 @@ function clearFieldError(inputId) {
 
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
-  // Check if returning from Paystack redirect
+  // 🔹 CHECK IF RETURNING FROM PAYSTACK REDIRECT
   const urlParams = new URLSearchParams(window.location.search);
   const paystackRef = urlParams.get('reference');
 
   if (paystackRef) {
     console.log("[Payment] Detected Paystack redirect with ref:", paystackRef);
-    // Get stored data
+
+    // Get stored payment data from sessionStorage
     const stored = sessionStorage.getItem("scholarmark_payment");
     if (stored) {
-      const paymentData = JSON.parse(stored);
-      S.submissionId = paymentData.submissionId;
-      S.email = paymentData.email;
-      S.level = paymentData.level;
+      try {
+        const paymentData = JSON.parse(stored);
+        S.submissionId = paymentData.submissionId;
+        S.email = paymentData.email;
+        S.level = paymentData.level;
 
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+        // Clean URL
+        window.history.replaceState({}, document.title, window.location.pathname);
 
-      // Show processing and verify
-      S.step = "processing";
-      renderWidget();
-      await verifyPayment(paystackRef);
-      sessionStorage.removeItem("scholarmark_payment");
-      return;
+        // Show processing state immediately
+        S.step = "processing";
+        renderWidget();
+
+        // Verify payment and trigger document processing
+        await verifyPayment(paystackRef);
+
+        // Clear stored data
+        sessionStorage.removeItem("scholarmark_payment");
+        return; // Stop further initialization
+      } catch (e) {
+        console.error("[Redirect] Error resuming payment:", e);
+        showErr("Payment completed but there was an error loading your review. Please contact support with reference: " + paystackRef);
+      }
     }
   }
 
+  // 🔹 SET PRICES
   S.prices = {
     "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES", amount: 1500 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
@@ -421,7 +435,7 @@ async function doPayment() {
     console.log("[Payment] Init success — ref:", initData.reference);
     console.log("[Payment] Auth URL:", initData.authorization_url);
 
-    // Store payment info for redirect resume
+    // 🔹 STORE PAYMENT DATA FOR REDIRECT RESUME
     sessionStorage.setItem("scholarmark_payment", JSON.stringify({
       submissionId: S.submissionId,
       reference: initData.reference,
@@ -429,7 +443,7 @@ async function doPayment() {
       level: S.level
     }));
 
-    // Use redirect (most reliable)
+    // 🔹 USE REDIRECT (MOST RELIABLE)
     if (initData.authorization_url) {
       console.log("[Payment] Redirecting to Paystack...");
       window.location.href = initData.authorization_url;
@@ -448,6 +462,7 @@ async function doPayment() {
           level: S.level,
           name: S.name,
         },
+        // 🔹 PLAIN FUNCTION CALLBACKS (not async, not arrow)
         callback: function (response) {
           console.log("[Payment] Paystack callback — ref:", response.reference);
           setTimeout(function () {
