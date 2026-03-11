@@ -474,6 +474,8 @@ async function doPayment() {
       const handler = window.PaystackPop.setup({
         key: S.paystackKey,
         email: S.email,
+        amount: S.prices[S.level].minor,
+        currency: "KES",
         access_code: initData.access_code,
         callback: function (response) {
           console.log("[Payment] Paystack callback — ref:", response.reference);
