@@ -1,7 +1,6 @@
 /**
  * app.js — ScholarMark Frontend
  * API_BASE is defined in config.js (loaded first in index.html)
- * All API keys live on the server. This file only talks to our own backend.
  */
 const S = {
   step: "upload",
@@ -88,30 +87,6 @@ function clearFieldError(inputId) {
 
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
-  // 🔍 Check if we're returning from Paystack redirect
-  const urlParams = new URLSearchParams(window.location.search);
-  const paystackRef = urlParams.get('reference');
-
-  if (paystackRef && sessionStorage.getItem("scholarmark_payment")) {
-    console.log("[Payment] Resuming after Paystack redirect, ref:", paystackRef);
-    const stored = JSON.parse(sessionStorage.getItem("scholarmark_payment"));
-    S.submissionId = stored.submissionId;
-    S.email = stored.email;
-    S.level = stored.level;
-
-    // Clear the URL params
-    window.history.replaceState({}, document.title, window.location.pathname);
-
-    // Show processing state
-    S.step = "processing";
-    renderWidget();
-
-    // Verify payment
-    await verifyPayment(paystackRef);
-    sessionStorage.removeItem("scholarmark_payment");
-    return; // Stop further initialization
-  }
-
   S.prices = {
     "Level 7": { formatted: "KES 20", minor: 2000, currency: "KES", amount: 20 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
@@ -136,25 +111,23 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function loadPaystackKey() {
   try {
-    console.log('[Fetch] Loading paystack key from:', `${API_BASE}/api/pubkey`);
-    const res = await fetch(`${API_BASE}/api/pubkey`, { credentials: 'include' });
+    const res = await fetch(`${API_BASE}/api/pubkey`, { credentials: "include" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     S.paystackKey = data.key;
     console.log("[Paystack] Key loaded:", S.paystackKey ? "✓" : "✗ MISSING");
   } catch (e) {
-    console.error("[Paystack] Could not load payment config:", e);
+    console.error("[Paystack] Could not load key:", e);
   }
 }
 
 async function loadLocationAndPricing() {
   try {
-    console.log('[Fetch] Loading location from:', `${API_BASE}/api/location`);
     const res = await fetch(`${API_BASE}/api/location`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: "{}",
-      credentials: 'include'
+      credentials: "include",
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -163,7 +136,6 @@ async function loadLocationAndPricing() {
       S.currency = data.currency;
       S.prices = data.prices;
       updatePricingUI();
-      console.log('[Location] Detected:', S.country, S.currency);
     }
   } catch (e) {
     console.warn("[Location] Detection failed, using KES fallback:", e);
@@ -174,10 +146,6 @@ function updatePricingUI() {
   document.querySelectorAll("[data-price-level]").forEach(el => {
     const level = el.dataset.priceLevel;
     if (S.prices[level]) el.textContent = S.prices[level].formatted;
-  });
-  document.querySelectorAll(".lo-p").forEach(el => {
-    const level = el.closest("[data-level]")?.dataset.level;
-    if (level && S.prices[level]) el.textContent = S.prices[level].formatted;
   });
 }
 
@@ -318,7 +286,6 @@ async function toPayment() {
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
   try {
-    console.log('[Fetch] Submitting to:', `${API_BASE}/api/submission`);
     const form = new FormData();
     form.append("name", S.name);
     form.append("email", S.email || "pending@scholarmark.co.ke");
@@ -328,7 +295,7 @@ async function toPayment() {
     const res = await fetch(`${API_BASE}/api/submission`, {
       method: "POST",
       body: form,
-      credentials: 'include'
+      credentials: "include",
     });
     const data = await res.json();
     if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
@@ -336,7 +303,7 @@ async function toPayment() {
     S.step = "payment";
     renderWidget();
   } catch (e) {
-    console.error('[Submission] Error:', e);
+    console.error("[Submission] Error:", e);
     showErr("Network error. Please check your connection and try again.");
   } finally {
     if (btn) { btn.disabled = false; }
@@ -381,26 +348,18 @@ async function doPayment() {
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
 
   try {
-    console.log('[Fetch] Initializing payment:', `${API_BASE}/api/payment/init`);
+    // Step 1: Init payment on backend to get reference + access_code
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ submissionId: S.submissionId }),
-      credentials: 'include'
+      credentials: "include",
     });
 
-    // 🔍 Better error handling for non-JSON responses
     const contentType = initRes.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
       const text = await initRes.text();
-      console.error("[Payment/Init] Non-JSON response:", initRes.status, text);
       throw new Error(`Server returned ${initRes.status}: ${text.slice(0, 200)}`);
-    }
-
-    if (!initRes.ok) {
-      const errData = await initRes.json().catch(() => ({}));
-      console.error('[Payment/Init] HTTP Error:', initRes.status, errData);
-      throw new Error(`HTTP ${initRes.status}: ${errData.error || "Unknown error"}`);
     }
 
     const initData = await initRes.json();
@@ -410,96 +369,62 @@ async function doPayment() {
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
-    // Already paid + review exists — skip Paystack
+    // Already paid — load existing review immediately
     if (initData.alreadyPaid && initData.reviewToken) {
-      console.log("[Payment] Already paid, loading existing review");
-      if (btn) { btn.disabled = false; }
+      if (btn) btn.disabled = false;
       S.step = "processing";
       renderWidget();
       await loadReview(initData.reviewToken);
       return;
     }
 
-    console.log("[Payment] Init success", {
-      access_code: initData.access_code,
-      reference: initData.reference,
-      authorization_url: initData.authorization_url
-    });
+    console.log("[Payment] Init success — ref:", initData.reference);
 
-    // 🔍 Wait for Paystack script to be fully ready
-    await new Promise((resolve, reject) => {
-      if (window.PaystackPop || window._paystackScriptLoaded) {
-        console.log("[Paystack] PaystackPop is available:", window.PaystackPop ? Object.keys(window.PaystackPop) : "script loaded");
-        resolve();
-      } else {
-        console.warn("[Paystack] PaystackPop not found, waiting...");
-        let attempts = 0;
-        const check = setInterval(() => {
-          attempts++;
-          if (window.PaystackPop || window._paystackScriptLoaded) {
-            clearInterval(check);
-            console.log("[Paystack] Paystack loaded after", attempts, "attempts");
-            resolve();
-          } else if (attempts > 20) {
-            clearInterval(check);
-            reject(new Error("Paystack failed to load after 20 attempts"));
-          }
-        }, 250);
-      }
-    });
-
-    // 🔍 Use the most reliable method: REDIRECT FALLBACK
-    if (initData.authorization_url) {
-      console.log("[Payment] Using redirect fallback to:", initData.authorization_url);
-
-      // Store state in sessionStorage so we can resume after redirect
-      sessionStorage.setItem("scholarmark_payment", JSON.stringify({
-        submissionId: S.submissionId,
-        reference: initData.reference,
-        email: S.email,
-        level: S.level
-      }));
-
-      // Redirect to Paystack hosted checkout (most reliable)
-      window.location.href = initData.authorization_url;
-      return;
+    // Step 2: Open Paystack popup using the access_code
+    // The popup fires onSuccess directly — no redirect, no cold-start risk
+    if (!window.PaystackPop) {
+      throw new Error("Paystack script not loaded. Please refresh the page.");
     }
 
-    // Fallback to popup only if redirect fails (shouldn't happen)
-    if (window.PaystackPop && typeof window.PaystackPop.resumeTransaction === "function") {
-      console.log("[Paystack] Using resumeTransaction (v2)");
-      window.PaystackPop.resumeTransaction(initData.access_code, {
-        onSuccess: async (transaction) => {
-          console.log("[Payment] Paystack success", transaction);
-          S.step = "processing";
-          renderWidget();
-          await verifyPayment(transaction?.reference || initData.reference);
-        },
-        onCancel: () => {
-          showErr("Payment was cancelled. Your submission is saved — you can pay again.");
-          if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
-        },
-      });
-    } else {
-      console.error("[Paystack] No valid payment method available");
-      throw new Error("Paystack popup not available");
-    }
+    const handler = window.PaystackPop.setup({
+      key: S.paystackKey,
+      email: S.email,
+      amount: S.prices[S.level].minor,
+      currency: "KES",
+      ref: initData.reference,
+      metadata: {
+        submission_id: S.submissionId,
+        level: S.level,
+        name: S.name,
+      },
+      onClose: () => {
+        // User closed popup without paying — re-enable button
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`;
+        }
+        showErr("Payment was cancelled. Your submission is saved — click Pay to try again.");
+      },
+      callback: async (response) => {
+        // Payment successful — response.reference is the confirmed reference
+        console.log("[Payment] Paystack callback — ref:", response.reference);
+        S.step = "processing";
+        renderWidget();
+        // Scroll to the widget so user sees the processing screen
+        document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        await verifyPayment(response.reference);
+      },
+    });
+
+    handler.openIframe();
 
   } catch (e) {
-    // 🔍 Full error details for debugging
-    console.error("[Payment] Full exception details:", {
-      name: e?.name,
-      message: e?.message,
-      stack: e?.stack,
-      toString: e?.toString?.(),
-      API_BASE,
-      submissionId: S.submissionId,
-      paystackKey: S.paystackKey ? "present" : "MISSING",
-      PaystackPop: typeof window.PaystackPop
-    });
-
-    showErr("Payment failed. Details in console. Please try again or contact support.");
-    if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
+    console.error("[Payment] Error:", e);
+    showErr(e.message || "Payment failed. Please try again.");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`;
+    }
   }
 }
 
@@ -529,33 +454,7 @@ ${stages.map(([t, lbl]) => `
 </div>`;
 }
 
-// ─── LOAD REVIEW BY TOKEN ─────────────────────────────────────────
-async function loadReview(token) {
-  S.reviewToken = token;
-  S.progress = 100;
-  if (document.getElementById("pFill")) updateProgress();
-  try {
-    console.log('[Fetch] Loading review:', `${API_BASE}/api/review/${token}`);
-    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`, { credentials: 'include' });
-    if (!reviewRes.ok) throw new Error(`HTTP ${reviewRes.status}`);
-    const reviewData = await reviewRes.json();
-    if (!reviewRes.ok || !reviewData.success) {
-      S.step = "payment";
-      renderWidget();
-      showErr("Review could not be loaded. Please contact support.");
-      return;
-    }
-    S.review = reviewData.result;
-    S.step = "results";
-    setTimeout(() => renderWidget(), 400);
-  } catch (e) {
-    console.error('[Review] Error:', e);
-    S.step = "payment";
-    renderWidget();
-    showErr("Network error loading review. Please contact support.");
-  }
-}
-
+// ─── VERIFY & LOAD REVIEW ─────────────────────────────────────────
 async function verifyPayment(reference) {
   S.progress = 8;
   const iv = setInterval(() => {
@@ -563,17 +462,16 @@ async function verifyPayment(reference) {
     updateProgress();
   }, 800);
   try {
-    console.log('[Fetch] Verifying payment:', `${API_BASE}/api/payment/verify`);
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reference }),
-      credentials: 'include'
+      credentials: "include",
     });
+    clearInterval(iv);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    clearInterval(iv);
-    if (!res.ok || !data.success) {
+    if (!data.success) {
       S.step = "payment";
       renderWidget();
       showErr(data.error || "Payment verification failed. Please contact support with reference: " + reference);
@@ -581,11 +479,41 @@ async function verifyPayment(reference) {
     }
     await loadReview(data.reviewToken);
   } catch (e) {
-    console.error('[Verify] Error:', e);
     clearInterval(iv);
+    console.error("[Verify] Error:", e);
     S.step = "payment";
     renderWidget();
-    showErr("Network error during verification. Please contact support with your payment reference.");
+    showErr("Network error during verification. Please contact support with your payment reference: " + reference);
+  }
+}
+
+async function loadReview(token) {
+  S.reviewToken = token;
+  S.progress = 95;
+  updateProgress();
+  try {
+    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`, { credentials: "include" });
+    if (!reviewRes.ok) throw new Error(`HTTP ${reviewRes.status}`);
+    const reviewData = await reviewRes.json();
+    if (!reviewData.success) {
+      S.step = "payment";
+      renderWidget();
+      showErr("Review could not be loaded. Please contact support.");
+      return;
+    }
+    S.review = reviewData.result;
+    S.progress = 100;
+    updateProgress();
+    S.step = "results";
+    setTimeout(() => {
+      renderWidget();
+      document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 400);
+  } catch (e) {
+    console.error("[Review] Error:", e);
+    S.step = "payment";
+    renderWidget();
+    showErr("Network error loading review. Please contact support.");
   }
 }
 
@@ -684,7 +612,7 @@ function downloadReport() {
   if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 700); }
 }
 
-// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO (unchanged) ────────────
+// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO ────────────────────────
 function setupNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;

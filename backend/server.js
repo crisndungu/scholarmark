@@ -249,11 +249,19 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       }
       return res.status(400).json({ error: "Already paid. Contact support if your review is missing." });
     }
-    const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
+    const originUrl = req.headers.origin || req.headers.referer || "https://www.scholarmark.co.ke";
+    let callbackUrl;
+    try {
+      callbackUrl = new URL(originUrl).origin + "/";
+    } catch (e) {
+      callbackUrl = "https://www.scholarmark.co.ke/";
+    }
+
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
       reference: ref,
+      callback_url: callbackUrl,
       metadata: {
         submission_id: submissionId,
         level: submission.level,
