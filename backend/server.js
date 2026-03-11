@@ -79,7 +79,14 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    if (!origin) return cb(null, true);
+    if (
+      allowedOrigins.includes(origin) ||
+      /^https:\/\/scholarmark.*\.vercel\.app$/.test(origin) ||
+      /^https:\/\/.*\.onrender\.com$/.test(origin)
+    ) {
+      return cb(null, true);
+    }
     console.log(`[CORS BLOCKED] ${origin}`);
     cb(new Error("CORS: origin not allowed"));
   },
