@@ -7,7 +7,7 @@
 
 // ─── FIXED KES PRICES ─────────────────────────────────────────────
 const KES_PRICES = {
-  "Level 7": 1500,
+  "Level 7": 20,
   "Level 8": 2500,
   "Level 9": 3500,
   "Level 10": 5000,
@@ -48,7 +48,7 @@ async function getPricingForCurrency(currency) {
 async function convertPrice(gbpPence, targetCurrency) {
   const level = Object.entries({ "Level 7": 700, "Level 8": 1200, "Level 9": 1800, "Level 10": 2500 })
     .find(([, p]) => p === gbpPence)?.[0];
-  const kes = level ? KES_PRICES[level] : 50;
+  const kes = level ? KES_PRICES[level] : 1500;
   return {
     currency: "KES", symbol: "KES", amount: kes,
     minor: kes * 100, display: kes.toLocaleString("en-KE"),
