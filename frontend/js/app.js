@@ -113,7 +113,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   S.prices = {
-    "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES", amount: 1500 },
+    "Level 7": { formatted: "KES 20", minor: 2000, currency: "KES", amount: 20 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
     "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES", amount: 3500 },
     "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES", amount: 5000 },
