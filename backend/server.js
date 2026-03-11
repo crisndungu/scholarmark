@@ -79,16 +79,8 @@ const allowedOrigins = [
 ];
 app.use(cors({
   origin: (origin, cb) => {
-    // No origin = same-origin / curl / Postman — always allow
-    if (!origin) return cb(null, true);
-    // Exact match
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Allow ANY vercel.app subdomain (covers preview deployments like scholarmark-git-main-xxx.vercel.app)
-    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
-    // Allow any onrender.com subdomain
-    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
-    console.warn(`[CORS] Blocked origin: ${origin}`);
-    cb(new Error("CORS: origin not allowed"));
+    // If there's an origin, allow it explicitly to support credentials:true. Otherwise allow true.
+    cb(null, origin || true);
   },
   credentials: true,
 }));
