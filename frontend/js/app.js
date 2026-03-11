@@ -91,10 +91,10 @@ function clearFieldError(inputId) {
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   S.prices = {
-    "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES" },
-    "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES" },
-    "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES" },
-    "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES" },
+    "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES", amount: 1500 },
+    "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
+    "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES", amount: 3500 },
+    "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES", amount: 5000 },
   };
 
   setupNav();
@@ -277,7 +277,7 @@ function addFiles(newFiles) {
     S.files.push(f);
   }
   renderWidget();
-};
+}
 
 function removeFile(idx) { const ni = document.getElementById("nameIn"); if (ni) S.name = ni.value; S.files.splice(idx, 1); renderWidget(); }
 function pickLevel(lv) { const ni = document.getElementById("nameIn"); if (ni) S.name = ni.value; S.level = lv; renderWidget(); }
@@ -338,7 +338,7 @@ function renderPayment() {
 <button class="btn-w" type="button" onclick="doPayment()">
   Pay ${price?.formatted || "…"} — Secure Checkout
 </button>
-<button class="btn-w-outline" type="button" onclick="S.step='upload';renderWidget()">← Back</button>`;
+<button class="btn-w-outline" type="button" onclick="S.step='upload';S.submissionId=null;renderWidget()">← Back</button>`;
 }
 
 async function doPayment() {
