@@ -478,6 +478,7 @@ async function doPayment() {
         currency: "KES",
         access_code: initData.access_code,
         callback: function (response) {
+          console.log("[Payment] Paystack callback response:", response);
           console.log("[Payment] Paystack callback — ref:", response.reference);
           setTimeout(function () {
             S.step = "processing";

@@ -126,7 +126,7 @@ const db_helpers = {
 
   async getTransactionByRef(ref) {
     const result = await db.execute({
-      sql: "SELECT * FROM transactions WHERE paystack_ref = ?",
+      sql: "SELECT * FROM transactions WHERE paystack_ref = ? COLLATE NOCASE",
       args: [ref],
     });
     return toObj(result.rows[0]) || null;

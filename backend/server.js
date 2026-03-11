@@ -252,19 +252,21 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
+    const finalRef = paystackRes.data.reference || ref;
+
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
-      paystack_ref: ref,
+      paystack_ref: finalRef,
       amount: submission.amount,
       currency: submission.currency,
     });
 
-    console.log(`[Payment/Init] Success — ref: ${ref}, access_code: ${paystackRes.data.access_code}`);
+    console.log(`[Payment/Init] Success — ref: ${finalRef}, access_code: ${paystackRes.data.access_code}`);
     res.json({
       success: true,
       access_code: paystackRes.data.access_code,
-      reference: ref,
+      reference: finalRef,
       authorization_url: paystackRes.data.authorization_url,
     });
   } catch (err) {
@@ -277,8 +279,14 @@ app.post("/api/payment/verify", async (req, res) => {
   try {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: "Reference required." });
+    console.log("[Verify/Start] Received reference:", reference);
     const transaction = await db.getTransactionByRef(reference);
-    if (!transaction) return res.status(404).json({ error: "Transaction not found." });
+    if (!transaction) {
+      console.error("[Verify/Error] Transaction not found for ref:", reference);
+      return res.status(404).json({ error: "Transaction not found." });
+    }
+    console.log(`[Verify/Status] Found transaction ${transaction.id}, current status: ${transaction.status}`);
+
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
       const submission = await db.getSubmissionById(transaction.submission_id);
