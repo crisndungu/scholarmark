@@ -88,7 +88,7 @@ function clearFieldError(inputId) {
 
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
-  // 🔹 CHECK IF RETURNING FROM PAYSTACK REDIRECT
+  // CHECK IF RETURNING FROM PAYSTACK REDIRECT
   const urlParams = new URLSearchParams(window.location.search);
   const paystackRef = urlParams.get('reference');
 
@@ -98,23 +98,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     S.submissionId = stored.submissionId;
     S.email = stored.email;
     S.level = stored.level;
-
-    // Clean URL
     window.history.replaceState({}, document.title, window.location.pathname);
-
-    // Show processing
     S.step = "processing";
     renderWidget();
-
-    // Verify payment
     await verifyPayment(paystackRef);
     sessionStorage.removeItem("scholarmark_payment");
-    return; // Stop further init
+    return;
   }
 
-  // 🔹 SET PRICES (Level 7 = 20 KES for testing)
   S.prices = {
-    "Level 7": { formatted: "KES 20", minor: 2000, currency: "KES", amount: 20 }, // ← TEST PRICE
+    "Level 7": { formatted: "KES 20", minor: 2000, currency: "KES", amount: 20 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
     "Level 9": { formatted: "KES 3,500", minor: 350000, currency: "KES", amount: 3500 },
     "Level 10": { formatted: "KES 5,000", minor: 500000, currency: "KES", amount: 5000 },
@@ -138,7 +131,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function loadPaystackKey() {
   try {
-    console.log('[Fetch] Loading paystack key from:', `${API_BASE}/api/pubkey`);
     const res = await fetch(`${API_BASE}/api/pubkey`, { credentials: 'include' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
@@ -151,7 +143,6 @@ async function loadPaystackKey() {
 
 async function loadLocationAndPricing() {
   try {
-    console.log('[Fetch] Loading location from:', `${API_BASE}/api/location`);
     const res = await fetch(`${API_BASE}/api/location`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -165,7 +156,6 @@ async function loadLocationAndPricing() {
       S.currency = data.currency;
       S.prices = data.prices;
       updatePricingUI();
-      console.log('[Location] Detected:', S.country, S.currency);
     }
   } catch (e) {
     console.warn("[Location] Detection failed, using KES fallback:", e);
@@ -320,18 +310,13 @@ async function toPayment() {
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
   try {
-    console.log('[Fetch] Submitting to:', `${API_BASE}/api/submission`);
     const form = new FormData();
     form.append("name", S.name);
     form.append("email", S.email || "pending@scholarmark.co.ke");
     form.append("level", S.level);
     form.append("currency", S.currency);
     S.files.forEach(f => form.append("files", f));
-    const res = await fetch(`${API_BASE}/api/submission`, {
-      method: "POST",
-      body: form,
-      credentials: 'include'  // ← ADDED
-    });
+    const res = await fetch(`${API_BASE}/api/submission`, { method: "POST", body: form, credentials: 'include' });
     const data = await res.json();
     if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
     S.submissionId = data.submissionId;
@@ -383,38 +368,28 @@ async function doPayment() {
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
 
   try {
-    console.log('[Fetch] Initializing payment:', `${API_BASE}/api/payment/init`);
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ submissionId: S.submissionId }),
-      credentials: 'include'  // ← ADDED
+      credentials: 'include'
     });
 
-    // Better error handling for non-JSON responses
     const contentType = initRes.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
       const text = await initRes.text();
-      console.error("[Payment/Init] Non-JSON response:", initRes.status, text);
       throw new Error(`Server returned ${initRes.status}: ${text.slice(0, 200)}`);
-    }
-
-    if (!initRes.ok) {
-      const errData = await initRes.json().catch(() => ({}));
-      console.error('[Payment/Init] HTTP Error:', initRes.status, errData);
-      throw new Error(`HTTP ${initRes.status}: ${errData.error || "Unknown error"}`);
     }
 
     const initData = await initRes.json();
 
-    if (!initData.success) {
+    if (!initRes.ok || !initData.success) {
       if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
-    // Already paid + review exists — skip Paystack
+    // Already paid — load existing review
     if (initData.alreadyPaid && initData.reviewToken) {
-      console.log("[Payment] Already paid, loading existing review");
       if (btn) { btn.disabled = false; }
       S.step = "processing";
       renderWidget();
@@ -422,96 +397,57 @@ async function doPayment() {
       return;
     }
 
-    console.log("[Payment] Init success", {
-      access_code: initData.access_code,
-      reference: initData.reference,
-      authorization_url: initData.authorization_url
+    console.log("[Payment] Init success — ref:", initData.reference);
+
+    // Wait for PaystackPop to be available
+    await new Promise(function (resolve, reject) {
+      if (window.PaystackPop) { resolve(); return; }
+      let attempts = 0;
+      const check = setInterval(function () {
+        attempts++;
+        if (window.PaystackPop) { clearInterval(check); resolve(); }
+        else if (attempts > 20) { clearInterval(check); reject(new Error("Paystack failed to load")); }
+      }, 250);
     });
 
-    // 🔹 WAIT FOR PAYSTACK TO BE READY
-    await new Promise((resolve, reject) => {
-      if (window.PaystackPop || window._paystackScriptLoaded) {
-        console.log("[Paystack] Ready:", window.PaystackPop ? Object.keys(window.PaystackPop) : "script loaded");
-        resolve();
-      } else {
-        let attempts = 0;
-        const check = setInterval(() => {
-          attempts++;
-          if (window.PaystackPop || window._paystackScriptLoaded) {
-            clearInterval(check);
-            console.log("[Paystack] Loaded after", attempts, "attempts");
-            resolve();
-          } else if (attempts > 20) {
-            clearInterval(check);
-            reject(new Error("Paystack failed to load after 20 attempts"));
-          }
-        }, 250);
-      }
+    if (typeof window.PaystackPop.setup !== "function") {
+      throw new Error("PaystackPop.setup is not a function");
+    }
+
+    // ── PLAIN FUNCTION CALLBACKS — no async, no arrow functions ──
+    const handler = window.PaystackPop.setup({
+      key: S.paystackKey,
+      email: S.email,
+      amount: S.prices[S.level].minor,
+      ref: initData.reference,
+      metadata: {
+        submission_id: S.submissionId,
+        level: S.level,
+        name: S.name,
+      },
+      onClose: function () {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`;
+        }
+        showErr("Payment was cancelled. Your submission is saved — you can pay again.");
+      },
+      callback: function (response) {
+        // ⚠️ PLAIN function — no async, no arrow. Paystack validates typeof callback === 'function'
+        console.log("[Payment] Paystack callback — ref:", response.reference);
+        S.step = "processing";
+        renderWidget();
+        document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "center" });
+        // verifyPayment returns a Promise — we don't await it here (not allowed in callback)
+        verifyPayment(response.reference);
+      },
     });
 
-    // 🔹 USE REDIRECT FALLBACK (MOST RELIABLE)
-    if (initData.authorization_url) {
-      console.log("[Payment] Redirecting to:", initData.authorization_url);
-
-      // Store state for post-redirect resume
-      sessionStorage.setItem("scholarmark_payment", JSON.stringify({
-        submissionId: S.submissionId,
-        reference: initData.reference,
-        email: S.email,
-        level: S.level
-      }));
-
-      // Redirect to Paystack hosted checkout
-      window.location.href = initData.authorization_url;
-      return; // Stop here — user will return after payment
-    }
-
-    // Fallback: Try popup only if redirect fails (shouldn't happen)
-    if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
-      const handler = window.PaystackPop.setup({
-        key: S.paystackKey,
-        email: S.email,
-        amount: S.prices[S.level].minor,
-        // ⚠️ DO NOT pass currency for test accounts — let Paystack use account default
-        ref: initData.reference,
-        metadata: {
-          submission_id: S.submissionId,
-          level: S.level,
-          name: S.name,
-        },
-        onClose: () => {
-          if (btn) {
-            btn.disabled = false;
-            btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`;
-          }
-          showErr("Payment was cancelled. Your submission is saved — you can pay again.");
-        },
-        callback: async (response) => {
-          console.log("[Payment] Paystack callback — ref:", response.reference);
-          S.step = "processing";
-          renderWidget();
-          await verifyPayment(response.reference);
-        },
-      });
-      handler.openIframe();
-    } else {
-      throw new Error("Paystack popup not available");
-    }
+    handler.openIframe();
 
   } catch (e) {
-    // Full error details for debugging
-    console.error("[Payment] Full exception details:", {
-      name: e?.name,
-      message: e?.message,
-      stack: e?.stack,
-      toString: e?.toString?.(),
-      API_BASE,
-      submissionId: S.submissionId,
-      paystackKey: S.paystackKey ? "present" : "MISSING",
-      PaystackPop: typeof window.PaystackPop
-    });
-
-    showErr("Payment failed. Details in console. Please try again or contact support.");
+    console.error("[Payment] Exception:", e.message);
+    showErr("Payment failed. Please try again or contact support.");
     if (btn) {
       btn.disabled = false;
       btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`;
@@ -545,33 +481,7 @@ ${stages.map(([t, lbl]) => `
 </div>`;
 }
 
-// ─── LOAD REVIEW BY TOKEN ─────────────────────────────────────────
-async function loadReview(token) {
-  S.reviewToken = token;
-  S.progress = 100;
-  if (document.getElementById("pFill")) updateProgress();
-  try {
-    console.log('[Fetch] Loading review:', `${API_BASE}/api/review/${token}`);
-    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`, { credentials: 'include' });
-    if (!reviewRes.ok) throw new Error(`HTTP ${reviewRes.status}`);
-    const reviewData = await reviewRes.json();
-    if (!reviewRes.ok || !reviewData.success) {
-      S.step = "payment";
-      renderWidget();
-      showErr("Review could not be loaded. Please contact support.");
-      return;
-    }
-    S.review = reviewData.result;
-    S.step = "results";
-    setTimeout(() => renderWidget(), 400);
-  } catch (e) {
-    console.error('[Review] Error:', e);
-    S.step = "payment";
-    renderWidget();
-    showErr("Network error loading review. Please contact support.");
-  }
-}
-
+// ─── VERIFY & LOAD REVIEW ─────────────────────────────────────────
 async function verifyPayment(reference) {
   S.progress = 8;
   const iv = setInterval(() => {
@@ -579,14 +489,12 @@ async function verifyPayment(reference) {
     updateProgress();
   }, 800);
   try {
-    console.log('[Fetch] Verifying payment:', `${API_BASE}/api/payment/verify`);
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ reference }),
-      credentials: 'include'  // ← ADDED
+      credentials: 'include'
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     clearInterval(iv);
     if (!res.ok || !data.success) {
@@ -597,11 +505,40 @@ async function verifyPayment(reference) {
     }
     await loadReview(data.reviewToken);
   } catch (e) {
-    console.error('[Verify] Error:', e);
     clearInterval(iv);
+    console.error('[Verify] Error:', e);
     S.step = "payment";
     renderWidget();
-    showErr("Network error during verification. Please contact support with your payment reference.");
+    showErr("Network error during verification. Please contact support with your payment reference: " + reference);
+  }
+}
+
+async function loadReview(token) {
+  S.reviewToken = token;
+  S.progress = 95;
+  updateProgress();
+  try {
+    const res = await fetch(`${API_BASE}/api/review/${token}`, { credentials: 'include' });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      S.step = "payment";
+      renderWidget();
+      showErr("Review could not be loaded. Please contact support.");
+      return;
+    }
+    S.review = data.result;
+    S.progress = 100;
+    updateProgress();
+    S.step = "results";
+    setTimeout(() => {
+      renderWidget();
+      document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 400);
+  } catch (e) {
+    console.error('[Review] Error:', e);
+    S.step = "payment";
+    renderWidget();
+    showErr("Network error loading review. Please contact support.");
   }
 }
 
@@ -684,7 +621,7 @@ function downloadReport() {
   const sf = s => s >= 70 ? "#deedf9" : s >= 50 ? "#fef9c3" : "#fee2e2";
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>ScholarMark Report — ${esc(S.name)}</title>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet">
-<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Outfit',sans-serif;background:#fff;color:#1a1a1a;font-size:10.5pt;line-height:1.65}.cover{background:#002147;color:#f5f5f5;padding:52px 48px;position:relative;overflow:hidden}.c-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px}.c-brand{font-family:'EB Garamond',serif;font-size:1.1rem;color:rgba(185,214,242,0.5)}.c-badge{font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.18em;text-transform:uppercase;color:rgba(185,214,242,0.3);background:rgba(185,214,242,0.07);border:1px solid rgba(185,214,242,0.12);padding:4px 10px;border-radius:2px}h1{font-family:'EB Garamond',serif;font-size:26pt;font-weight:400;line-height:1.1;color:white;margin-bottom:6px}h1 em{font-style:italic;color:#b9d6f2}.c-sub{font-family:'JetBrains Mono',monospace;font-size:7pt;color:rgba(185,214,242,0.3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:32px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:14px}.mi{border-top:1px solid rgba(185,214,242,0.1);padding-top:11px}.mi label{font-family:'JetBrains Mono',monospace;font-size:6pt;text-transform:uppercase;letter-spacing:0.18em;opacity:0.35;display:block;margin-bottom:3px}.mi value{font-size:9.5pt;font-weight:500;display:block;color:#e8f2fb}.sb{display:flex;align-items:center;gap:22px;padding:22px 48px;background:#f0f7fd;border-bottom:2px solid #deedf9}.ss{width:76px;height:76px;border:2px solid #002147;background:${sf(r.overallScore)};display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}.sn{font-family:'EB Garamond',serif;font-size:24pt;color:${sc(r.overallScore)};line-height:1}.sd{font-family:'JetBrains Mono',monospace;font-size:6.5pt;color:#8a8680}.si h2{font-family:'EB Garamond',serif;font-size:16pt;color:#002147;font-style:italic;margin-bottom:5px}.si p{font-size:8.5pt;color:#555;line-height:1.7;max-width:500px}.sec{padding:20px 48px;border-bottom:1px solid #e8e4df}.sec h3{font-family:'EB Garamond',serif;font-size:11pt;color:#002147;font-style:italic;margin-bottom:10px;display:flex;align-items:center;gap:8px}.sec h3::after{content:'';flex:1;height:1px;background:#e8e4df}.tags{display:flex;flex-wrap:wrap;gap:6px}.tg{padding:3px 9px;border-radius:100px;font-size:7.5pt}.tg-g{background:#dcfce7;color:#15803d;border:1px solid #86efac}.tg-r{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}.cg{display:grid;grid-template-columns:1fr 1fr;gap:9px}.ci{border:1px solid #e8e4df;padding:11px;border-radius:3px}.cn{font-family:'JetBrains Mono',monospace;font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#8a8680;margin-bottom:2px}.cs{font-family:'EB Garamond',serif;font-size:17pt;color:${sc(r.overallScore)};line-height:1}.bar{height:2px;background:#e8e4df;border-radius:1px;margin:4px 0}.bf{height:2px;border-radius:1px}.cf{font-size:8pt;color:#555;line-height:1.55}table{width:100%;border-collapse:collapse}th{background:#002147;color:#f0f7fd;padding:7px 11px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em;text-transform:uppercase}td{padding:8px 11px;border-bottom:1px solid #f0f0ec;font-size:8.5pt;vertical-align:top}tr:nth-child(even) td{background:#fafaf8}.pb{padding:2px 6px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;font-weight:700}.pH{background:#fee2e2;color:#b91c1c}.pM{background:#fef9c3;color:#a16207}.pL{background:#dcfce7;color:#15803d}.rb{display:inline-block;background:#deedf9;border:1px solid #b9d6f2;color:#002147;padding:5px 14px;border-radius:3px;font-size:9pt;font-weight:500}.note{border-left:3px solid #002147;padding:13px 16px;background:#f0f7fd;font-family:'EB Garamond',serif;font-style:italic;color:#2c2c2c;line-height:1.8;font-size:9.5pt}ul.rl{list-style:none}ul.rl li{padding:6px 11px 6px 22px;background:#fafaf8;border-radius:2px;font-size:8.5pt;color:#555;position:relative;margin-bottom:4px}ul.rl li::before{content:"→";position:absolute;left:7px;color:#002147}.footer{background:#002147;color:rgba(185,214,242,0.2);text-align:center;padding:11px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
+<style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Outfit',sans-serif;background:#fff;color:#1a1a1a;font-size:10.5pt;line-height:1.65}.cover{background:#002147;color:#f5f5f5;padding:52px 48px}.c-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px}.c-brand{font-family:'EB Garamond',serif;font-size:1.1rem;color:rgba(185,214,242,0.5)}.c-badge{font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.18em;text-transform:uppercase;color:rgba(185,214,242,0.3);background:rgba(185,214,242,0.07);border:1px solid rgba(185,214,242,0.12);padding:4px 10px;border-radius:2px}h1{font-family:'EB Garamond',serif;font-size:26pt;font-weight:400;line-height:1.1;color:white;margin-bottom:6px}h1 em{font-style:italic;color:#b9d6f2}.c-sub{font-family:'JetBrains Mono',monospace;font-size:7pt;color:rgba(185,214,242,0.3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:32px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:14px}.mi{border-top:1px solid rgba(185,214,242,0.1);padding-top:11px}.mi label{font-family:'JetBrains Mono',monospace;font-size:6pt;text-transform:uppercase;letter-spacing:0.18em;opacity:0.35;display:block;margin-bottom:3px}.mi value{font-size:9.5pt;font-weight:500;display:block;color:#e8f2fb}.sb{display:flex;align-items:center;gap:22px;padding:22px 48px;background:#f0f7fd;border-bottom:2px solid #deedf9}.ss{width:76px;height:76px;border:2px solid #002147;background:${sf(r.overallScore)};display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}.sn{font-family:'EB Garamond',serif;font-size:24pt;color:${sc(r.overallScore)};line-height:1}.sd{font-family:'JetBrains Mono',monospace;font-size:6.5pt;color:#8a8680}.si h2{font-family:'EB Garamond',serif;font-size:16pt;color:#002147;font-style:italic;margin-bottom:5px}.si p{font-size:8.5pt;color:#555;line-height:1.7;max-width:500px}.sec{padding:20px 48px;border-bottom:1px solid #e8e4df}.sec h3{font-family:'EB Garamond',serif;font-size:11pt;color:#002147;font-style:italic;margin-bottom:10px;display:flex;align-items:center;gap:8px}.sec h3::after{content:'';flex:1;height:1px;background:#e8e4df}.tags{display:flex;flex-wrap:wrap;gap:6px}.tg{padding:3px 9px;border-radius:100px;font-size:7.5pt}.tg-g{background:#dcfce7;color:#15803d;border:1px solid #86efac}.tg-r{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}.cg{display:grid;grid-template-columns:1fr 1fr;gap:9px}.ci{border:1px solid #e8e4df;padding:11px;border-radius:3px}.cn{font-family:'JetBrains Mono',monospace;font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#8a8680;margin-bottom:2px}.cs{font-family:'EB Garamond',serif;font-size:17pt;line-height:1}.bar{height:2px;background:#e8e4df;border-radius:1px;margin:4px 0}.bf{height:2px;border-radius:1px}.cf{font-size:8pt;color:#555;line-height:1.55}table{width:100%;border-collapse:collapse}th{background:#002147;color:#f0f7fd;padding:7px 11px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em;text-transform:uppercase}td{padding:8px 11px;border-bottom:1px solid #f0f0ec;font-size:8.5pt;vertical-align:top}tr:nth-child(even) td{background:#fafaf8}.pb{padding:2px 6px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;font-weight:700}.pH{background:#fee2e2;color:#b91c1c}.pM{background:#fef9c3;color:#a16207}.pL{background:#dcfce7;color:#15803d}.rb{display:inline-block;background:#deedf9;border:1px solid #b9d6f2;color:#002147;padding:5px 14px;border-radius:3px;font-size:9pt;font-weight:500}.note{border-left:3px solid #002147;padding:13px 16px;background:#f0f7fd;font-family:'EB Garamond',serif;font-style:italic;color:#2c2c2c;line-height:1.8;font-size:9.5pt}ul.rl{list-style:none}ul.rl li{padding:6px 11px 6px 22px;background:#fafaf8;border-radius:2px;font-size:8.5pt;color:#555;position:relative;margin-bottom:4px}ul.rl li::before{content:"→";position:absolute;left:7px;color:#002147}.footer{background:#002147;color:rgba(185,214,242,0.2);text-align:center;padding:11px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
 <div class="cover"><div class="c-top"><div class="c-brand">ScholarMark</div><div class="c-badge">Academic Review Report</div></div><h1>Academic Review &<br/><em>Improvement Report</em></h1><div class="c-sub">Confidential · For academic improvement purposes only</div><div class="meta"><div class="mi"><label>Author</label><value>${esc(S.name || "—")}</value></div><div class="mi"><label>Documents submitted</label><value>${S.files.length} file${S.files.length !== 1 ? "s" : ""}</value></div><div class="mi"><label>Academic Level</label><value>${esc(S.level)} — ${esc(LEVEL_DATA[S.level]?.sub || "")}</value></div><div class="mi"><label>Date</label><value>${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</value></div></div></div>
 <div class="sb"><div class="ss"><span class="sn">${r.overallScore}</span><span class="sd">/ 100</span></div><div class="si"><h2>${esc(r.grade)}</h2><p>${esc(r.executiveSummary)}</p></div></div>
 <div class="sec"><h3>Strengths</h3><div class="tags">${r.strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("")}</div></div>
@@ -700,7 +637,7 @@ function downloadReport() {
   if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 700); }
 }
 
-// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO (unchanged) ────────────
+// ─── NAV / FAQ / MARQUEE / COUNTERS / HERO ────────────────────────
 function setupNav() {
   const nav = document.getElementById("nav");
   if (!nav) return;
