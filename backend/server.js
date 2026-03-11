@@ -36,8 +36,6 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ─── TRUST PROXY ──────────────────────────────────────────────────
-// Required on Render — without this, express-rate-limit throws
-// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and routes return 404
 app.set("trust proxy", 1);
 
 // ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
@@ -146,18 +144,6 @@ function getClientIP(req) {
   );
 }
 
-function isPrivateIP(ip) {
-  return (
-    !ip || ip === "127.0.0.1" || ip === "::1" ||
-    ip.startsWith("192.168.") || ip.startsWith("10.") ||
-    ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
-    ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
-    ip.startsWith("172.2") || ip.startsWith("172.30.") ||
-    ip.startsWith("172.31.") || ip.startsWith("::ffff:127.") ||
-    ip.startsWith("::ffff:192.168.") || ip.startsWith("::ffff:10.")
-  );
-}
-
 async function paystackRequest(method, endpoint, body) {
   const res = await fetch(`https://api.paystack.co${endpoint}`, {
     method,
@@ -168,16 +154,6 @@ async function paystackRequest(method, endpoint, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
-}
-
-// ─── Paystack only supports certain currencies on test accounts ───
-// If the detected currency isn't supported, fall back to NGN (always
-// enabled on Paystack test accounts) or USD.
-const PAYSTACK_SUPPORTED_CURRENCIES = ["NGN", "USD", "GHS", "ZAR", "KES"];
-function getSafeCurrency(currency) {
-  if (PAYSTACK_SUPPORTED_CURRENCIES.includes(currency)) return currency;
-  // Default to NGN for test — change to USD if your account is USD-primary
-  return "NGN";
 }
 
 // ─── ROUTES ───────────────────────────────────────────────────────
@@ -225,7 +201,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     const geo = geoip.lookup(ip);
 
     const submissionId = uuidv4();
-    db.createSubmission({
+    await db.createSubmission({
       id: submissionId,
       name: name.trim().slice(0, 200),
       email: email.trim().toLowerCase().slice(0, 254),
@@ -267,31 +243,18 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
 
-    const submission = db.getSubmissionById(submissionId);
+    const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
 
-    if (db.hasSuccessfulPayment(submissionId))
+    if (await db.hasSuccessfulPayment(submissionId))
       return res.status(400).json({ error: "This submission has already been paid for." });
 
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
 
-    // ── Use only currencies supported by your Paystack account ──
-    // On test accounts, only NGN/USD/GHS/ZAR/KES are typically enabled.
-    // If the submission currency isn't supported, fall back to NGN.
-    const paystackCurrency = getSafeCurrency(submission.currency);
-
-    // If currency changed, recalculate the amount in the fallback currency
-    let amount = submission.amount;
-    if (paystackCurrency !== submission.currency) {
-      const fallbackPrices = await pricing.getPricingForCurrency(paystackCurrency);
-      amount = fallbackPrices[submission.level]?.minor || submission.amount;
-      console.log(`[Payment/Init] Currency fallback: ${submission.currency} → ${paystackCurrency}, amount: ${amount}`);
-    }
-
     const paystackRes = await paystackRequest("POST", "/transaction/initialize", {
       email: submission.email,
-      amount,
-      currency: paystackCurrency,
+      amount: submission.amount,
+      currency: submission.currency,
       reference: ref,
       metadata: {
         submission_id: submissionId,
@@ -307,12 +270,12 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Please try again."}` });
     }
 
-    db.createTransaction({
+    await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
       paystack_ref: ref,
-      amount,
-      currency: paystackCurrency,
+      amount: submission.amount,
+      currency: submission.currency,
     });
 
     res.json({ success: true, access_code: paystackRes.data.access_code, reference: ref });
@@ -327,30 +290,36 @@ app.post("/api/payment/verify", async (req, res) => {
     const { reference } = req.body;
     if (!reference) return res.status(400).json({ error: "Reference required." });
 
-    const transaction = db.getTransactionByRef(reference);
+    const transaction = await db.getTransactionByRef(reference);
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
 
     if (transaction.status === "success") {
-      const sub = db.getSubmissionById(transaction.submission_id);
-      const review = sub ? db.db.prepare("SELECT token FROM reviews WHERE submission_id = ?").get(sub.id) : null;
-      if (review) return res.json({ success: true, reviewToken: review.token });
+      const sub = await db.getSubmissionById(transaction.submission_id);
+      if (sub) {
+        const reviewRes = await db.db.execute({
+          sql: "SELECT token FROM reviews WHERE submission_id = ?",
+          args: [sub.id],
+        });
+        const review = reviewRes.rows[0];
+        if (review) return res.json({ success: true, reviewToken: review.token });
+      }
       return res.json({ success: true, status: "paid_awaiting_review" });
     }
 
     const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
 
     if (!verification.status || verification.data?.status !== "success") {
-      db.updateTransactionFailed(reference);
+      await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment was not successful." });
     }
 
     if (verification.data.amount !== transaction.amount) {
       console.error(`[FRAUD] Amount mismatch for ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
-      db.updateTransactionFailed(reference);
+      await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
     }
 
-    db.updateTransactionSuccess(reference, verification.data);
+    await db.updateTransactionSuccess(reference, verification.data);
     const reviewToken = await triggerReview(transaction);
     res.json({ success: true, reviewToken });
   } catch (err) {
@@ -373,7 +342,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
     const ref = event.data?.reference;
     if (!ref) return;
 
-    const transaction = db.getTransactionByRef(ref);
+    const transaction = await db.getTransactionByRef(ref);
     if (!transaction || transaction.status === "success") return;
 
     if (event.data.amount !== transaction.amount) {
@@ -381,7 +350,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
       return;
     }
 
-    db.updateTransactionSuccess(ref, event.data);
+    await db.updateTransactionSuccess(ref, event.data);
     await triggerReview(transaction);
   } catch (err) {
     console.error("[Webhook] Error:", err);
@@ -389,7 +358,7 @@ app.post("/api/webhook/paystack", async (req, res) => {
 });
 
 async function triggerReview(transaction) {
-  const submission = db.getSubmissionById(transaction.submission_id);
+  const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
 
   const cached = fileTextCache.get(submission.id);
@@ -467,7 +436,7 @@ ${docContext}
   const result = JSON.parse(raw);
 
   const reviewToken = crypto.randomBytes(48).toString("hex");
-  db.createReview({
+  await db.createReview({
     id: uuidv4(),
     submission_id: submission.id,
     transaction_id: transaction.id,
@@ -480,12 +449,12 @@ ${docContext}
   return reviewToken;
 }
 
-app.get("/api/review/:token", (req, res) => {
+app.get("/api/review/:token", async (req, res) => {
   try {
     const { token } = req.params;
     if (!token || token.length < 96) return res.status(400).json({ error: "Invalid token." });
 
-    const review = db.getReviewByToken(token);
+    const review = await db.getReviewByToken(token);
     if (!review) return res.status(404).json({ error: "Review not found. The link may have expired." });
 
     res.json({
