@@ -395,12 +395,13 @@ async function doPayment() {
         },
       });
     } else if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
-      // Paystack inline v1 — use setup() instead
+      // Paystack inline v1 — use setup() with access_code only (no currency field)
       const handler = window.PaystackPop.setup({
         key: S.paystackKey,
         email: S.email,
         amount: S.prices[S.level]?.minor,
-        currency: S.currency,
+        // NOTE: Do NOT pass currency — let Paystack use account default
+        // Passing KES on an NGN test account causes silent popup failure
         ref: initData.reference,
         onClose: () => {
           showErr("Payment was cancelled. Your submission is saved — you can pay again.");
