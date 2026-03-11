@@ -1,6 +1,6 @@
 /**
- * app.js — ScholarMark Frontend (FULLY FIXED)
- * API_BASE is defined in config.js (loaded first in index.html)
+ * app.js — ScholarMark Frontend
+ * API_BASE must be defined globally by config.js (loaded before this file)
  */
 
 // Global state object
@@ -152,6 +152,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function loadPaystackKey() {
   try {
+    // 🔹 Ensure API_BASE is defined
+    if (typeof API_BASE === 'undefined') {
+      console.error('[Paystack] API_BASE is not defined! Check config.js');
+      return;
+    }
+
     console.log('[Fetch] Loading Paystack key from:', `${API_BASE}/api/pubkey`);
     const res = await fetch(`${API_BASE}/api/pubkey`, { credentials: 'include' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -165,6 +171,11 @@ async function loadPaystackKey() {
 
 async function loadLocationAndPricing() {
   try {
+    if (typeof API_BASE === 'undefined') {
+      console.error('[Location] API_BASE is not defined!');
+      return;
+    }
+
     console.log('[Fetch] Loading location from:', `${API_BASE}/api/location`);
     const res = await fetch(`${API_BASE}/api/location`, {
       method: "POST",
@@ -334,6 +345,8 @@ async function toPayment() {
   const btn = document.querySelector(".btn-w");
   if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
   try {
+    if (typeof API_BASE === 'undefined') throw new Error("API_BASE not defined");
+
     console.log('[Fetch] Submitting to:', `${API_BASE}/api/submission`);
     const form = new FormData();
     form.append("name", S.name);
@@ -397,6 +410,8 @@ async function doPayment() {
   if (btn) { btn.disabled = true; btn.textContent = "Initialising payment…"; }
 
   try {
+    if (typeof API_BASE === 'undefined') throw new Error("API_BASE not defined");
+
     console.log('[Fetch] Initializing payment:', `${API_BASE}/api/payment/init`);
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
@@ -436,12 +451,16 @@ async function doPayment() {
     console.log("[Payment] Auth URL:", initData.authorization_url);
 
     // 🔹 STORE PAYMENT DATA FOR REDIRECT RESUME
-    sessionStorage.setItem("scholarmark_payment", JSON.stringify({
+    const paymentData = {
       submissionId: S.submissionId,
       reference: initData.reference,
       email: S.email,
-      level: S.level
-    }));
+      level: S.level,
+      timestamp: Date.now()
+    };
+
+    sessionStorage.setItem("scholarmark_payment", JSON.stringify(paymentData));
+    localStorage.setItem("scholarmark_payment_backup", JSON.stringify(paymentData)); // Fallback
 
     // 🔹 USE REDIRECT (MOST RELIABLE)
     if (initData.authorization_url) {
@@ -530,6 +549,8 @@ async function verifyPayment(reference) {
   }, 800);
 
   try {
+    if (typeof API_BASE === 'undefined') throw new Error("API_BASE not defined");
+
     console.log('[Fetch] Verifying payment:', `${API_BASE}/api/payment/verify`);
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
       method: "POST",
@@ -568,6 +589,8 @@ async function loadReview(token) {
   updateProgress();
 
   try {
+    if (typeof API_BASE === 'undefined') throw new Error("API_BASE not defined");
+
     console.log('[Fetch] Loading review:', `${API_BASE}/api/review/${token}`);
     const res = await fetch(`${API_BASE}/api/review/${token}`, { credentials: 'include' });
     const data = await res.json();
