@@ -35,6 +35,10 @@ for (const key of WARN_ENV) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Required on Render (and any host behind a reverse proxy)
+// Fixes express-rate-limit ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+app.set("trust proxy", 1);
+
 // ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -79,8 +83,16 @@ const allowedOrigins = [
 ];
 app.use(cors({
   origin: (origin, cb) => {
-    // If there's an origin, allow it explicitly to support credentials:true. Otherwise allow true.
-    cb(null, origin || true);
+    // No origin = same-origin / curl / Postman — always allow
+    if (!origin) return cb(null, true);
+    // Exact match
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // Allow ANY vercel.app subdomain (covers preview deployments like scholarmark-git-main-xxx.vercel.app)
+    if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
+    // Allow any onrender.com subdomain
+    if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
+    console.warn(`[CORS] Blocked origin: ${origin}`);
+    cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
 }));
@@ -255,8 +267,11 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
 
-    const submission = db.getSubmissionById(submissionId);
-    if (!submission) return res.status(404).json({ error: "Submission not found." });
+    const submissionRow = await db.getSubmissionById(submissionId);
+    if (!submissionRow) return res.status(404).json({ error: "Submission not found." });
+    // Spread Turso row into plain object so all fields are accessible
+    const submission = { ...submissionRow };
+    console.log("[Payment/Init] Submission fields:", JSON.stringify(submission));
 
     // If already paid, check if review exists and return it — don't block the user
     if (await db.hasSuccessfulPayment(submissionId)) {
@@ -279,7 +294,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     // the account causes "Invalid Amount Sent".
     const paystackPayload = {
       email: submission.email,
-      amount: parseInt(submission.amount, 10),   // in cents: KES 1500 → 150000, must be an integer
+      amount: submission.amount,   // in cents: KES 1500 → 150000
       reference: ref,
       metadata: {
         submission_id: submissionId,

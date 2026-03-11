@@ -1,5 +1,7 @@
 /**
  * database.js — Turso (libSQL) schema and helpers
+ * All rows are spread into plain objects before returning
+ * so fields are always accessible as submission.amount, submission.email etc.
  */
 
 const { createClient } = require("@libsql/client");
@@ -68,15 +70,26 @@ initSchema().catch(err => {
   process.exit(1);
 });
 
-// ─── HELPERS ──────────────────────────────────────────────────────
+// ─── ROW HELPER ───────────────────────────────────────────────────
+// Turso rows are array-like objects. Spreading them into a plain {}
+// ensures dot-notation access (row.amount, row.email etc.) always works.
+function toObj(row) {
+  if (!row) return null;
+  return Object.fromEntries(
+    Object.entries(row).filter(([k]) => !['toJSON', 'columnNames', 'columnOrigins'].includes(k))
+  );
+}
 
+// ─── HELPERS ──────────────────────────────────────────────────────
 const db_helpers = {
   db,
 
   async createSubmission(data) {
     await db.execute({
-      sql: `INSERT INTO submissions (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address)
-            VALUES (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address)`,
+      sql: `INSERT INTO submissions
+              (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address)
+            VALUES
+              (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address)`,
       args: data,
     });
   },
@@ -89,12 +102,36 @@ const db_helpers = {
     });
   },
 
+  async getSubmissionById(id) {
+    const result = await db.execute({
+      sql: "SELECT * FROM submissions WHERE id = ?",
+      args: [id],
+    });
+    return toObj(result.rows[0]) || null;
+  },
+
   async getTransactionByRef(ref) {
     const result = await db.execute({
       sql: "SELECT * FROM transactions WHERE paystack_ref = ?",
       args: [ref],
     });
-    return result.rows[0] || null;
+    return toObj(result.rows[0]) || null;
+  },
+
+  async getTransactionBySubmission(submissionId) {
+    const result = await db.execute({
+      sql: "SELECT * FROM transactions WHERE submission_id = ? AND status = 'success' LIMIT 1",
+      args: [submissionId],
+    });
+    return toObj(result.rows[0]) || null;
+  },
+
+  async hasSuccessfulPayment(submissionId) {
+    const result = await db.execute({
+      sql: "SELECT id FROM transactions WHERE submission_id = ? AND status = 'success'",
+      args: [submissionId],
+    });
+    return result.rows.length > 0;
   },
 
   async updateTransactionSuccess(ref, paystackData) {
@@ -143,10 +180,9 @@ const db_helpers = {
             WHERE r.token = ?`,
       args: [token],
     });
-    return result.rows[0] || null;
+    return toObj(result.rows[0]) || null;
   },
 
-  // ── NEW: look up a review by submission ID (for already-paid fast-path)
   async getReviewBySubmissionId(submissionId) {
     const result = await db.execute({
       sql: `SELECT r.*, s.name, s.email, s.level, s.file_names
@@ -156,31 +192,7 @@ const db_helpers = {
             ORDER BY r.created_at DESC LIMIT 1`,
       args: [submissionId],
     });
-    return result.rows[0] || null;
-  },
-
-  async getSubmissionById(id) {
-    const result = await db.execute({
-      sql: "SELECT * FROM submissions WHERE id = ?",
-      args: [id],
-    });
-    return result.rows[0] || null;
-  },
-
-  async getTransactionBySubmission(submissionId) {
-    const result = await db.execute({
-      sql: "SELECT * FROM transactions WHERE submission_id = ? AND status = 'success' LIMIT 1",
-      args: [submissionId],
-    });
-    return result.rows[0] || null;
-  },
-
-  async hasSuccessfulPayment(submissionId) {
-    const result = await db.execute({
-      sql: "SELECT id FROM transactions WHERE submission_id = ? AND status = 'success'",
-      args: [submissionId],
-    });
-    return result.rows.length > 0;
+    return toObj(result.rows[0]) || null;
   },
 };
 
