@@ -1,23 +1,5 @@
 /**
  * server.js — ScholarMark Backend
- *
- * Architecture:
- *   POST /api/location         → Detect country + return pricing
- *   POST /api/submission        → Accept files, create submission record
- *   POST /api/payment/init      → Initialize Paystack transaction (server-side)
- *   POST /api/payment/verify    → Verify payment + trigger review
- *   POST /api/webhook/paystack  → Paystack webhook (HMAC verified)
- *   GET  /api/review/:token     → Retrieve completed review
- *   GET  /api/pubkey            → Serve Paystack public key to frontend
- *
- * Security:
- *   - Helmet (security headers)
- *   - CORS (origin whitelist)
- *   - Rate limiting per route
- *   - HMAC webhook verification
- *   - Server-side Paystack verification (never trust client)
- *   - Files held in memory only — never written to disk
- *   - Anthropic key never exposed to browser
  */
 
 require("dotenv").config();
@@ -36,7 +18,6 @@ const db = require("./database");
 const pricing = require("./pricing");
 
 // ─── CONFIG VALIDATION ────────────────────────────────────────────
-// Hard required — without these the core service cannot function at all
 const FATAL_ENV = ["ANTHROPIC_API_KEY", "SESSION_SECRET"];
 for (const key of FATAL_ENV) {
   if (!process.env[key] || process.env[key].includes("XXXXXXX") || process.env[key].includes("CHANGE_THIS")) {
@@ -44,7 +25,6 @@ for (const key of FATAL_ENV) {
     process.exit(1);
   }
 }
-// Warn only — server can start without these, but payments will not work
 const WARN_ENV = ["PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY"];
 for (const key of WARN_ENV) {
   if (!process.env[key] || process.env[key].includes("XXXXXXX")) {
@@ -55,13 +35,16 @@ for (const key of WARN_ENV) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
+// ─── TRUST PROXY ──────────────────────────────────────────────────
+// Required on Render — without this, express-rate-limit throws
+// ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and routes return 404
+app.set("trust proxy", 1);
 
+// ─── SECURITY MIDDLEWARE ───────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // 'unsafe-eval' is required by Paystack's inline.js which uses eval() internally
       scriptSrc: [
         "'self'",
         "https://js.paystack.co",
@@ -69,7 +52,7 @@ app.use(helmet({
         "'unsafe-inline'",
         "'unsafe-eval'",
       ],
-      scriptSrcAttr: ["'unsafe-inline'"],  // allow inline onclick/onkeydown handlers
+      scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       connectSrc: [
@@ -87,7 +70,7 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false,
 }));
 
-// ─── CORS — only allow your own frontend ──────────────────────────
+// ─── CORS ─────────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://scholarmark.vercel.app",
   process.env.FRONTEND_URL,
@@ -97,21 +80,14 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, cb) => {
-    // ✅ Allow null origin (file://, Postman, curl)
-    // ✅ Allow your listed origins
-    if (!origin || allowedOrigins.includes(origin)) {
-      return cb(null, true);
-    }
-    console.log(`[CORS BLOCKED] ${origin}`); // Debug log
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    console.log(`[CORS BLOCKED] ${origin}`);
     cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
 }));
 
-
 // ─── RATE LIMITERS ────────────────────────────────────────────────
-
-// General API: 100 req/15min per IP
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
@@ -120,14 +96,12 @@ const generalLimiter = rateLimit({
   message: { error: "Too many requests. Please try again shortly." },
 });
 
-// Submission: 5 per hour per IP (prevent abuse)
 const submissionLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 5,
   message: { error: "Submission limit reached. Please try again in an hour." },
 });
 
-// Payment init: 10 per hour per IP
 const paymentLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
@@ -136,20 +110,17 @@ const paymentLimiter = rateLimit({
 
 app.use("/api", generalLimiter);
 
-// ─── RAW BODY for Webhook (must be before express.json) ───────────
+// ─── RAW BODY for Webhook ─────────────────────────────────────────
 app.use("/api/webhook/paystack", express.raw({ type: "application/json" }));
 
 // ─── BODY PARSING ─────────────────────────────────────────────────
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
-// ─── FILE UPLOAD (memory only — never touches disk) ───────────────
+// ─── FILE UPLOAD ──────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024,  // 10MB per file
-    files: 10,                    // max 10 files
-  },
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
   fileFilter: (req, file, cb) => {
     const allowed = /\.(pdf|doc|docx|txt)$/i;
     if (!allowed.test(file.originalname)) {
@@ -165,7 +136,7 @@ app.use(express.static(path.join(__dirname, "../frontend"), {
   maxAge: process.env.NODE_ENV === "production" ? "1d" : 0,
 }));
 
-// ─── HELPER: get client IP ────────────────────────────────────────
+// ─── HELPERS ──────────────────────────────────────────────────────
 function getClientIP(req) {
   return (
     req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
@@ -175,28 +146,18 @@ function getClientIP(req) {
   );
 }
 
-// ─── HELPER: detect private/loopback IP ───────────────────────────
 function isPrivateIP(ip) {
   return (
-    !ip ||
-    ip === "127.0.0.1" ||
-    ip === "::1" ||
-    ip.startsWith("192.168.") ||
-    ip.startsWith("10.") ||
-    ip.startsWith("172.16.") ||
-    ip.startsWith("172.17.") ||
-    ip.startsWith("172.18.") ||
-    ip.startsWith("172.19.") ||
-    ip.startsWith("172.2") ||
-    ip.startsWith("172.30.") ||
-    ip.startsWith("172.31.") ||
-    ip.startsWith("::ffff:127.") ||
-    ip.startsWith("::ffff:192.168.") ||
-    ip.startsWith("::ffff:10.")
+    !ip || ip === "127.0.0.1" || ip === "::1" ||
+    ip.startsWith("192.168.") || ip.startsWith("10.") ||
+    ip.startsWith("172.16.") || ip.startsWith("172.17.") ||
+    ip.startsWith("172.18.") || ip.startsWith("172.19.") ||
+    ip.startsWith("172.2") || ip.startsWith("172.30.") ||
+    ip.startsWith("172.31.") || ip.startsWith("::ffff:127.") ||
+    ip.startsWith("::ffff:192.168.") || ip.startsWith("::ffff:10.")
   );
 }
 
-// ─── HELPER: Paystack API call ────────────────────────────────────
 async function paystackRequest(method, endpoint, body) {
   const res = await fetch(`https://api.paystack.co${endpoint}`, {
     method,
@@ -209,70 +170,53 @@ async function paystackRequest(method, endpoint, body) {
   return res.json();
 }
 
+// ─── Paystack only supports certain currencies on test accounts ───
+// If the detected currency isn't supported, fall back to NGN (always
+// enabled on Paystack test accounts) or USD.
+const PAYSTACK_SUPPORTED_CURRENCIES = ["NGN", "USD", "GHS", "ZAR", "KES"];
+function getSafeCurrency(currency) {
+  if (PAYSTACK_SUPPORTED_CURRENCIES.includes(currency)) return currency;
+  // Default to NGN for test — change to USD if your account is USD-primary
+  return "NGN";
+}
+
 // ─── ROUTES ───────────────────────────────────────────────────────
 
-/**
- * GET /api/pubkey
- * Returns the Paystack public key so the frontend never needs it hardcoded
- */
 app.get("/api/pubkey", (req, res) => {
   res.json({ key: process.env.PAYSTACK_PUBLIC_KEY });
 });
 
-/**
- * POST /api/location
- * Detect country from IP → return currency + pricing
- */
 app.post("/api/location", async (req, res) => {
   try {
     const ip = getClientIP(req);
-    let countryCode = "US"; // fallback
-
-    // Try GeoIP lookup
+    let countryCode = "US";
     const geo = geoip.lookup(ip);
     if (geo?.country) countryCode = geo.country;
-
-    // Allow override from client (if they select a different currency)
     if (req.body?.countryCode) countryCode = req.body.countryCode;
 
     const currency = pricing.getCurrencyForCountry(countryCode);
     const prices = await pricing.getPricingForCurrency(currency);
-
-    res.json({
-      success: true,
-      country: countryCode,
-      currency,
-      prices, // { "Level 7": { symbol, display, formatted, minor, ... }, ... }
-    });
+    res.json({ success: true, country: countryCode, currency, prices });
   } catch (err) {
     console.error("[Location]", err);
-    // Fallback to USD
     const prices = await pricing.getPricingForCurrency("USD");
     res.json({ success: true, country: "US", currency: "USD", prices });
   }
 });
 
-/**
- * POST /api/submission
- * Accepts files + metadata, creates submission record
- * Returns submissionId for the payment step
- */
 app.post("/api/submission", submissionLimiter, upload.array("files", 10), async (req, res) => {
   try {
     const { name, email, level, currency } = req.body;
 
-    // Validate inputs
     if (!name?.trim()) return res.status(400).json({ error: "Name is required." });
     if (!email?.includes("@")) return res.status(400).json({ error: "Valid email is required." });
     if (!level || !["Level 7", "Level 8", "Level 9", "Level 10"].includes(level))
       return res.status(400).json({ error: "Invalid academic level." });
     if (!req.files?.length) return res.status(400).json({ error: "At least one file is required." });
 
-    // Validate currency
     const validCurrencies = Object.keys(pricing.CURRENCY_CONFIG);
     const useCurrency = validCurrencies.includes(currency) ? currency : "USD";
 
-    // Get authoritative price from server (never trust client-submitted price)
     const prices = await pricing.getPricingForCurrency(useCurrency);
     const priceData = prices[level];
     if (!priceData) return res.status(400).json({ error: "Invalid level/currency." });
@@ -280,7 +224,6 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     const ip = getClientIP(req);
     const geo = geoip.lookup(ip);
 
-    // Store submission (no file content — files stay in memory for this request only)
     const submissionId = uuidv4();
     db.createSubmission({
       id: submissionId,
@@ -295,8 +238,6 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       ip_address: ip,
     });
 
-    // Store file texts in a temporary in-memory map (keyed by submissionId)
-    // They'll be used when the review is triggered post-payment
     fileTextCache.set(submissionId, {
       texts: req.files.map(f => ({
         name: f.originalname,
@@ -305,19 +246,14 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       created: Date.now(),
     });
 
-    res.json({
-      success: true,
-      submissionId,
-      price: priceData,
-      currency: useCurrency,
-    });
+    res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
     console.error("[Submission]", err);
     res.status(500).json({ error: "Submission failed. Please try again." });
   }
 });
 
-// In-memory file text cache — files are cleared after review or after 2 hours
+// In-memory file cache — cleared after review or 2 hours
 const fileTextCache = new Map();
 setInterval(() => {
   const cutoff = Date.now() - 2 * 60 * 60 * 1000;
@@ -326,11 +262,6 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000);
 
-/**
- * POST /api/payment/init
- * Initialize a Paystack transaction server-side (secret key never leaves server)
- * Returns access_code for the frontend popup
- */
 app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   try {
     const { submissionId } = req.body;
@@ -339,17 +270,28 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const submission = db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
 
-    // Prevent double-charging
     if (db.hasSuccessfulPayment(submissionId))
       return res.status(400).json({ error: "This submission has already been paid for." });
 
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
 
-    // Initialize with Paystack from the server
+    // ── Use only currencies supported by your Paystack account ──
+    // On test accounts, only NGN/USD/GHS/ZAR/KES are typically enabled.
+    // If the submission currency isn't supported, fall back to NGN.
+    const paystackCurrency = getSafeCurrency(submission.currency);
+
+    // If currency changed, recalculate the amount in the fallback currency
+    let amount = submission.amount;
+    if (paystackCurrency !== submission.currency) {
+      const fallbackPrices = await pricing.getPricingForCurrency(paystackCurrency);
+      amount = fallbackPrices[submission.level]?.minor || submission.amount;
+      console.log(`[Payment/Init] Currency fallback: ${submission.currency} → ${paystackCurrency}, amount: ${amount}`);
+    }
+
     const paystackRes = await paystackRequest("POST", "/transaction/initialize", {
       email: submission.email,
-      amount: submission.amount,
-      currency: submission.currency,
+      amount,
+      currency: paystackCurrency,
       reference: ref,
       metadata: {
         submission_id: submissionId,
@@ -362,35 +304,24 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
 
     if (!paystackRes.status) {
       console.error("[Payment/Init] Paystack error:", paystackRes);
-      return res.status(502).json({ error: "Payment initialization failed. Please try again." });
+      return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Please try again."}` });
     }
 
-    // Store transaction record
     db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
       paystack_ref: ref,
-      amount: submission.amount,
-      currency: submission.currency,
+      amount,
+      currency: paystackCurrency,
     });
 
-    res.json({
-      success: true,
-      access_code: paystackRes.data.access_code,
-      reference: ref,
-    });
+    res.json({ success: true, access_code: paystackRes.data.access_code, reference: ref });
   } catch (err) {
     console.error("[Payment/Init]", err);
     res.status(500).json({ error: "Payment initialization failed. Please try again." });
   }
 });
 
-/**
- * POST /api/payment/verify
- * Called by frontend after Paystack popup reports success.
- * We verify server-side — never trust the client.
- * If verified, trigger the AI review.
- */
 app.post("/api/payment/verify", async (req, res) => {
   try {
     const { reference } = req.body;
@@ -399,16 +330,13 @@ app.post("/api/payment/verify", async (req, res) => {
     const transaction = db.getTransactionByRef(reference);
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
 
-    // Already verified?
     if (transaction.status === "success") {
-      // Return existing review token if review exists
       const sub = db.getSubmissionById(transaction.submission_id);
       const review = sub ? db.db.prepare("SELECT token FROM reviews WHERE submission_id = ?").get(sub.id) : null;
       if (review) return res.json({ success: true, reviewToken: review.token });
       return res.json({ success: true, status: "paid_awaiting_review" });
     }
 
-    // Verify with Paystack (server-to-server)
     const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
 
     if (!verification.status || verification.data?.status !== "success") {
@@ -416,19 +344,14 @@ app.post("/api/payment/verify", async (req, res) => {
       return res.status(402).json({ error: "Payment was not successful." });
     }
 
-    // Double-check the amount matches what we expect (prevents price tampering)
     if (verification.data.amount !== transaction.amount) {
       console.error(`[FRAUD] Amount mismatch for ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
       db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
     }
 
-    // Mark transaction as paid
     db.updateTransactionSuccess(reference, verification.data);
-
-    // Trigger AI review
     const reviewToken = await triggerReview(transaction);
-
     res.json({ success: true, reviewToken });
   } catch (err) {
     console.error("[Payment/Verify]", err);
@@ -436,24 +359,13 @@ app.post("/api/payment/verify", async (req, res) => {
   }
 });
 
-/**
- * POST /api/webhook/paystack
- * Paystack webhook — HMAC SHA512 verified
- * Secondary insurance: if the client verification failed/missed, this catches it
- */
 app.post("/api/webhook/paystack", async (req, res) => {
-  // Immediately acknowledge
   res.sendStatus(200);
-
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     const signature = req.headers["x-paystack-signature"];
     const computed = crypto.createHmac("sha512", secret).update(req.body).digest("hex");
-
-    if (computed !== signature) {
-      console.warn("[Webhook] HMAC verification failed — ignoring");
-      return;
-    }
+    if (computed !== signature) { console.warn("[Webhook] HMAC verification failed"); return; }
 
     const event = JSON.parse(req.body.toString());
     if (event.event !== "charge.success") return;
@@ -462,10 +374,8 @@ app.post("/api/webhook/paystack", async (req, res) => {
     if (!ref) return;
 
     const transaction = db.getTransactionByRef(ref);
-    if (!transaction) return;
-    if (transaction.status === "success") return; // already processed
+    if (!transaction || transaction.status === "success") return;
 
-    // Verify amount
     if (event.data.amount !== transaction.amount) {
       console.error(`[Webhook/FRAUD] Amount mismatch ref ${ref}`);
       return;
@@ -478,18 +388,13 @@ app.post("/api/webhook/paystack", async (req, res) => {
   }
 });
 
-/**
- * triggerReview — calls Anthropic, stores result, returns token
- */
 async function triggerReview(transaction) {
   const submission = db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
 
-  // Get file texts from cache
   const cached = fileTextCache.get(submission.id);
   const files = cached?.texts || [];
 
-  // Build document context
   const docContext = files.length
     ? files.map((f, i) => {
       const role = i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL";
@@ -497,7 +402,6 @@ async function triggerReview(transaction) {
     }).join("\n\n")
     : "[Document text unavailable — files may have expired from cache]";
 
-  // Level criteria
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -562,9 +466,7 @@ ${docContext}
   const raw = anthropicData.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
   const result = JSON.parse(raw);
 
-  // Generate secure one-time access token
   const reviewToken = crypto.randomBytes(48).toString("hex");
-
   db.createReview({
     id: uuidv4(),
     submission_id: submission.id,
@@ -573,17 +475,11 @@ ${docContext}
     token: reviewToken,
   });
 
-  // Clear cached files (privacy)
   fileTextCache.delete(submission.id);
-
   console.log(`[Review] Completed for submission ${submission.id}`);
   return reviewToken;
 }
 
-/**
- * GET /api/review/:token
- * Retrieve a completed review by its secure token
- */
 app.get("/api/review/:token", (req, res) => {
   try {
     const { token } = req.params;
