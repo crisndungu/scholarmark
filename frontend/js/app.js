@@ -468,20 +468,11 @@ async function doPayment() {
     sessionStorage.setItem("scholarmark_payment", JSON.stringify(paymentData));
     localStorage.setItem("scholarmark_payment_backup", JSON.stringify(paymentData)); // Fallback
 
-    // 🔹 PREFER POPUP IF LOADED
+    // 🔹 PREFER POPUP IF LOADED (Using access_code from backend)
     if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
-      console.log("[Payment] Using Paystack Inline (Popup)");
+      console.log("[Payment] Using Paystack Inline (with access_code)");
       const handler = window.PaystackPop.setup({
-        key: S.paystackKey,
-        email: S.email,
-        amount: S.prices[S.level].minor,
-        currency: "KES",
-        ref: initData.reference,
-        metadata: {
-          submission_id: S.submissionId,
-          level: S.level,
-          name: S.name,
-        },
+        access_code: initData.access_code,
         callback: function (response) {
           console.log("[Payment] Paystack callback — ref:", response.reference);
           setTimeout(function () {
