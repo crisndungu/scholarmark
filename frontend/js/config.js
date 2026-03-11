@@ -31,3 +31,6 @@ const API_BASE = getAPIBase();
 // Log for debugging (remove in production if desired)
 console.log('[Config] API_BASE:', API_BASE);
 console.log('[Config] Current Host:', window.location.hostname);
+
+// Expose globally for app.js
+window.API_BASE = API_BASE;
