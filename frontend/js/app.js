@@ -1,11 +1,6 @@
 /**
- * API base URL — points to the Render backend.
- * Change this if your backend URL changes.
- */
-const API_BASE = "https://scholarmark.onrender.com";
-
-/**
  * app.js — ScholarMark Frontend
+ * API_BASE is defined in config.js (loaded first in index.html)
  * All API keys live on the server. This file only talks to our own backend.
  */
 
