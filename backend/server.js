@@ -205,7 +205,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
 
 app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   try {
-    const { submissionId } = req.body;
+    const { submissionId, callback_url } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
     const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
@@ -229,7 +229,7 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       email: submission.email,
       amount: submission.amount,
       reference: ref,
-      callback_url: frontendUrl,   // ← KEY FIX: Paystack redirects here after success
+      callback_url: callback_url || frontendUrl,   // ← Use dynamically sent URL if available
       metadata: {
         submission_id: submissionId,
         level: submission.level,
@@ -275,8 +275,18 @@ app.post("/api/payment/verify", async (req, res) => {
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
-      if (existingReview) return res.json({ success: true, reviewToken: existingReview.token });
-      return res.json({ success: true, status: "paid_awaiting_review" });
+      const submission = await db.getSubmissionById(transaction.submission_id);
+      return res.json({
+        success: true,
+        reviewToken: existingReview?.token || null,
+        status: existingReview ? "reviewed" : "paid_awaiting_review",
+        submission: submission ? {
+          name: submission.name,
+          email: submission.email,
+          level: submission.level,
+          fileCount: submission.file_count
+        } : null
+      });
     }
     const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
     if (!verification.status || verification.data?.status !== "success") {
@@ -293,7 +303,17 @@ app.post("/api/payment/verify", async (req, res) => {
     }
     await db.updateTransactionSuccess(reference, verification.data);
     const reviewToken = await triggerReview(transaction);
-    res.json({ success: true, reviewToken });
+    const submission = await db.getSubmissionById(transaction.submission_id);
+    res.json({
+      success: true,
+      reviewToken,
+      submission: submission ? {
+        name: submission.name,
+        email: submission.email,
+        level: submission.level,
+        fileCount: submission.file_count
+      } : null
+    });
   } catch (err) {
     console.error("[Payment/Verify]", err);
     res.status(500).json({ error: "Verification failed. Please contact support with your reference." });

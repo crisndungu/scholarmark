@@ -97,14 +97,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (paystackRef) {
     console.log("[Payment] Detected Paystack redirect with ref:", paystackRef);
 
-    // Get stored payment data from sessionStorage
-    const stored = sessionStorage.getItem("scholarmark_payment");
-    if (stored) {
+    const stored = sessionStorage.getItem("scholarmark_payment") || localStorage.getItem("scholarmark_payment_backup");
+    if (stored || paystackRef) {
       try {
-        const paymentData = JSON.parse(stored);
-        S.submissionId = paymentData.submissionId;
-        S.email = paymentData.email;
-        S.level = paymentData.level;
+        const paymentData = stored ? JSON.parse(stored) : {};
+        S.submissionId = paymentData.submissionId || null;
+        S.email = paymentData.email || "";
+        S.level = paymentData.level || "Level 7";
         S.files = Array.from({ length: paymentData.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
 
         // Clean URL
@@ -115,10 +114,12 @@ document.addEventListener("DOMContentLoaded", async () => {
         renderWidget();
 
         // Verify payment and trigger document processing
+        // Now verifyPayment will also restore S with real data from DB
         await verifyPayment(paystackRef);
 
         // Clear stored data
         sessionStorage.removeItem("scholarmark_payment");
+        localStorage.removeItem("scholarmark_payment_backup");
         return; // Stop further initialization
       } catch (e) {
         console.error("[Redirect] Error resuming payment:", e);
@@ -417,7 +418,10 @@ async function doPayment() {
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submissionId: S.submissionId }),
+      body: JSON.stringify({
+        submissionId: S.submissionId,
+        callback_url: window.location.href // Send current URL as callback
+      }),
       credentials: 'include'
     });
 
@@ -464,15 +468,9 @@ async function doPayment() {
     sessionStorage.setItem("scholarmark_payment", JSON.stringify(paymentData));
     localStorage.setItem("scholarmark_payment_backup", JSON.stringify(paymentData)); // Fallback
 
-    // 🔹 USE REDIRECT (MOST RELIABLE)
-    if (initData.authorization_url) {
-      console.log("[Payment] Redirecting to Paystack...");
-      window.location.href = initData.authorization_url;
-      return;
-    }
-
-    // Fallback to popup
+    // 🔹 PREFER POPUP IF LOADED
     if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
+      console.log("[Payment] Using Paystack Inline (Popup)");
       const handler = window.PaystackPop.setup({
         key: S.paystackKey,
         email: S.email,
@@ -483,7 +481,6 @@ async function doPayment() {
           level: S.level,
           name: S.name,
         },
-        // 🔹 PLAIN FUNCTION CALLBACKS (not async, not arrow)
         callback: function (response) {
           console.log("[Payment] Paystack callback — ref:", response.reference);
           setTimeout(function () {
@@ -501,9 +498,17 @@ async function doPayment() {
         },
       });
       handler.openIframe();
-    } else {
-      throw new Error("Paystack popup not available");
+      return;
     }
+
+    // 🔹 FALLBACK TO REDIRECT IF POPUP NOT AVAILABLE
+    if (initData.authorization_url) {
+      console.log("[Payment] Redirecting to Paystack (Fallback)...");
+      window.location.href = initData.authorization_url;
+      return;
+    }
+
+    throw new Error("Payment method not available");
 
   } catch (e) {
     console.error("[Payment] Exception:", e.message);
@@ -570,6 +575,17 @@ async function verifyPayment(reference) {
       renderWidget();
       showErr(data.error || "Payment verification failed. Ref: " + reference);
       return;
+    }
+
+    // Restore state from verification response if needed (handle lost state in redirects)
+    if (data.submission) {
+      console.log("[Verify] Restoring state from verification data");
+      S.name = data.submission.name || S.name;
+      S.email = data.submission.email || S.email;
+      S.level = data.submission.level || S.level;
+      if (!S.files.length || S.files[0].name.startsWith("File")) {
+        S.files = Array.from({ length: data.submission.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
+      }
     }
 
     console.log("[Verify] Success! Loading review...");
