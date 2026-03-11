@@ -1,13 +1,5 @@
 /**
  * database.js — Turso (libSQL) schema and helpers
- *
- * Replaces better-sqlite3 with @libsql/client for persistent cloud storage.
- * All queries are async now — callers must await them.
- *
- * Tables:
- *   submissions  — every upload attempt
- *   transactions — payment records (linked to submissions)
- *   reviews      — completed AI review results
  */
 
 const { createClient } = require("@libsql/client");
@@ -71,7 +63,6 @@ async function initSchema() {
   console.log("[DB] Turso ready at", process.env.TURSO_URL);
 }
 
-// Run schema init immediately — server.js imports this module at startup
 initSchema().catch(err => {
   console.error("[DB] Schema init failed:", err);
   process.exit(1);
@@ -151,6 +142,19 @@ const db_helpers = {
             JOIN submissions s ON s.id = r.submission_id
             WHERE r.token = ?`,
       args: [token],
+    });
+    return result.rows[0] || null;
+  },
+
+  // ── NEW: look up a review by submission ID (for already-paid fast-path)
+  async getReviewBySubmissionId(submissionId) {
+    const result = await db.execute({
+      sql: `SELECT r.*, s.name, s.email, s.level, s.file_names
+            FROM reviews r
+            JOIN submissions s ON s.id = r.submission_id
+            WHERE r.submission_id = ?
+            ORDER BY r.created_at DESC LIMIT 1`,
+      args: [submissionId],
     });
     return result.rows[0] || null;
   },

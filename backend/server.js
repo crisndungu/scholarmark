@@ -258,8 +258,15 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     const submission = db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
 
-    if (db.hasSuccessfulPayment(submissionId))
-      return res.status(400).json({ error: "This submission has already been paid for." });
+    // If already paid, check if review exists and return it — don't block the user
+    if (await db.hasSuccessfulPayment(submissionId)) {
+      const existingReview = await db.getReviewBySubmissionId(submissionId);
+      if (existingReview) {
+        console.log(`[Payment/Init] Already paid + reviewed — returning token for ${submissionId}`);
+        return res.json({ success: true, alreadyPaid: true, reviewToken: existingReview.token });
+      }
+      return res.status(400).json({ error: "This submission has already been paid for. Please contact support if your review is missing." });
+    }
 
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
 
@@ -320,27 +327,27 @@ app.post("/api/payment/verify", async (req, res) => {
     if (!transaction) return res.status(404).json({ error: "Transaction not found." });
 
     if (transaction.status === "success") {
-      const sub = db.getSubmissionById(transaction.submission_id);
-      const review = sub ? db.db.prepare("SELECT token FROM reviews WHERE submission_id = ?").get(sub.id) : null;
-      if (review) return res.json({ success: true, reviewToken: review.token });
+      // Already verified — look up existing review token
+      const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
+      if (existingReview) return res.json({ success: true, reviewToken: existingReview.token });
       return res.json({ success: true, status: "paid_awaiting_review" });
     }
 
     const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
 
     if (!verification.status || verification.data?.status !== "success") {
-      db.updateTransactionFailed(reference);
+      await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment was not successful." });
     }
 
     // FIX: Amount check — Paystack returns kobo/pesewas/cents, log mismatch clearly
     if (verification.data.amount !== transaction.amount) {
       console.error(`[FRAUD] Amount mismatch ref ${reference}: expected ${transaction.amount}, got ${verification.data.amount}`);
-      db.updateTransactionFailed(reference);
+      await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
     }
 
-    db.updateTransactionSuccess(reference, verification.data);
+    await db.updateTransactionSuccess(reference, verification.data);
     const reviewToken = await triggerReview(transaction);
     res.json({ success: true, reviewToken });
   } catch (err) {

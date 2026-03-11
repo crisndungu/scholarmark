@@ -268,6 +268,7 @@ function bindUpload() {
 }
 
 function addFiles(newFiles) {
+  const ni = document.getElementById("nameIn"); if (ni) S.name = ni.value;
   for (const f of newFiles) {
     if (S.files.length >= MAX_FILES) { showErr(`Maximum ${MAX_FILES} files allowed.`); break; }
     if (f.size > 10 * 1024 * 1024) { showErr(`"${f.name}" exceeds 10MB.`); continue; }
@@ -276,10 +277,10 @@ function addFiles(newFiles) {
     S.files.push(f);
   }
   renderWidget();
-}
+};
 
-function removeFile(idx) { S.files.splice(idx, 1); renderWidget(); }
-function pickLevel(lv) { S.level = lv; renderWidget(); }
+function removeFile(idx) { const ni = document.getElementById("nameIn"); if (ni) S.name = ni.value; S.files.splice(idx, 1); renderWidget(); }
+function pickLevel(lv) { const ni = document.getElementById("nameIn"); if (ni) S.name = ni.value; S.level = lv; renderWidget(); }
 
 async function toPayment() {
   const nm = document.getElementById("nameIn")?.value.trim();
@@ -365,6 +366,16 @@ async function doPayment() {
       return showErr(initData.error || "Payment initialization failed. Please try again.");
     }
 
+    // Already paid + review exists — skip Paystack, go straight to results
+    if (initData.alreadyPaid && initData.reviewToken) {
+      console.log("[Payment] Already paid, loading existing review");
+      if (btn) { btn.disabled = false; }
+      S.step = "processing";
+      renderWidget();
+      await loadReview(initData.reviewToken);
+      return;
+    }
+
     console.log("[Payment] Init success, access_code:", initData.access_code);
 
     // ── FIX: Use PaystackPop correctly ──────────────────────────────
@@ -446,6 +457,31 @@ function renderProcessing() {
 </div>`;
 }
 
+// ─── LOAD REVIEW BY TOKEN ─────────────────────────────────────────
+// Shared by verifyPayment and the alreadyPaid fast-path
+async function loadReview(token) {
+  S.reviewToken = token;
+  S.progress = 100;
+  if (document.getElementById("pFill")) updateProgress();
+  try {
+    const reviewRes = await fetch(`${API_BASE}/api/review/${token}`);
+    const reviewData = await reviewRes.json();
+    if (!reviewRes.ok || !reviewData.success) {
+      S.step = "payment";
+      renderWidget();
+      showErr("Review could not be loaded. Please contact support.");
+      return;
+    }
+    S.review = reviewData.result;
+    S.step = "results";
+    setTimeout(() => renderWidget(), 400);
+  } catch (e) {
+    S.step = "payment";
+    renderWidget();
+    showErr("Network error loading review. Please contact support.");
+  }
+}
+
 async function verifyPayment(reference) {
   S.progress = 8;
   const iv = setInterval(() => {
@@ -469,21 +505,7 @@ async function verifyPayment(reference) {
       return;
     }
 
-    S.reviewToken = data.reviewToken;
-    S.progress = 100;
-    updateProgress();
-
-    const reviewRes = await fetch(`${API_BASE}/api/review/${data.reviewToken}`);
-    const reviewData = await reviewRes.json();
-
-    if (!reviewRes.ok || !reviewData.success) {
-      showErr("Review completed but could not be loaded. Please refresh or contact support.");
-      return;
-    }
-
-    S.review = reviewData.result;
-    S.step = "results";
-    setTimeout(() => renderWidget(), 400);
+    await loadReview(data.reviewToken);
   } catch (e) {
     clearInterval(iv);
     S.step = "payment";
