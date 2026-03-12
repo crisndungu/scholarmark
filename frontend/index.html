@@ -126,6 +126,11 @@ HERO
             <button class="cta-p" onclick="document.getElementById('submit').scrollIntoView({behavior:'smooth'})">
               Submit Your Work
             </button>
+            <div id="hero-auth-cta" style="display: none;">
+              <button class="cta-p" style="background: var(--oxford); color: white;" onclick="window.Clerk.openSignIn()">
+                Get Started / Sign In
+              </button>
+            </div>
             <button class="cta-o" onclick="document.getElementById('how').scrollIntoView({behavior:'smooth'})">
               How It Works
             </button>

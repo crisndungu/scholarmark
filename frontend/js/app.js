@@ -146,20 +146,25 @@ async function initClerk() {
         const signInDiv = document.getElementById('sign-in-button');
         const userBtnDiv = document.getElementById('user-button');
         const portalLink = document.getElementById('portal-link');
+        const heroAuthCta = document.getElementById('hero-auth-cta');
 
         if (window.Clerk.user) {
-          if (signInDiv) signInDiv.style.display = 'none';
+          if (signInDiv) signInDiv.innerHTML = ''; 
           if (portalLink) portalLink.style.display = 'inline-block';
           if (userBtnDiv) window.Clerk.mountUserButton(userBtnDiv);
+          if (heroAuthCta) heroAuthCta.style.display = 'none';
           
-          // Pre-fill email if not already set
           if (!S.email) S.email = window.Clerk.user.primaryEmailAddress?.emailAddress || "";
         } else {
-          if (signInDiv) window.Clerk.mountSignInButton(signInDiv, { mode: 'modal', afterSignInUrl: '/portal.html' });
+          if (signInDiv) {
+            signInDiv.innerHTML = '<button class="nav-btn-alt">Sign In</button>';
+            signInDiv.onclick = () => window.Clerk.openSignIn({ afterSignInUrl: '/portal.html' });
+          }
           if (portalLink) portalLink.style.display = 'none';
+          if (heroAuthCta) heroAuthCta.style.display = 'block';
         }
         
-        // Always re-render widget to apply/remove auth wall
+        window.S.authReady = true;
         renderWidget();
       } catch (e) {
         console.error("[Clerk] Init failed:", e);
@@ -219,17 +224,11 @@ function renderWidget() {
       body.innerHTML = `
         <div style="text-align:center;padding:40px 20px">
           <div style="font-size:3rem;margin-bottom:20px">🔐</div>
-          <h3 style="font-family:'EB Garamond',serif;font-size:1.4rem;margin-bottom:12px">Please sign in to continue</h3>
-          <p style="color:#64748b;margin-bottom:24px;font-size:0.95rem">To submit documents for review, you must first create an account or sign in with Google.</p>
-          <div id="widget-auth"></div>
+          <h3 style="font-family:'EB Garamond',serif;font-size:1.4rem;margin-bottom:12px">Sign in to Submit Your Work</h3>
+          <p style="color:#64748b;margin-bottom:24px;font-size:0.95rem;line-height:1.6">To ensure your reviews are saved and accessible to you, we require a quick sign-in via Google.</p>
+          <button class="btn-w" onclick="window.Clerk.openSignIn({ mode: 'modal' })">Sign In / Create Account</button>
         </div>
       `;
-      setTimeout(() => {
-        if (window.Clerk) window.Clerk.mountSignIn(document.getElementById('widget-auth'), { 
-          afterSignInUrl: window.location.href, 
-          afterSignUpUrl: window.location.href 
-        });
-      }, 10);
     }
     syncDots();
     return;
