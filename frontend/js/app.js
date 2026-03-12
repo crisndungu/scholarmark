@@ -573,12 +573,15 @@ async function verifyPayment(reference) {
     clearInterval(iv);
 
     if (!res.ok || !data.success) {
-      console.error("[Verify] Failed:", data);
+      console.error("[Verify] Failed full data:", JSON.stringify(data, null, 2));
       S.step = "payment";
       renderWidget();
+
       let errMsg = data.error || "Payment verification failed.";
       if (data.paystackStatus) errMsg += ` (Status: ${data.paystackStatus})`;
       if (data.paystackMessage) errMsg += ` - ${data.paystackMessage}`;
+      if (data.received) errMsg += ` (Expected ${data.expected}, Got ${data.received})`;
+
       showErr(errMsg + " Ref: " + reference);
       return;
     }

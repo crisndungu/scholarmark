@@ -351,16 +351,23 @@ app.post("/api/payment/verify", async (req, res) => {
       return res.status(402).json({
         error: "Payment was not successful.",
         paystackStatus: verification.data?.status,
-        paystackMessage: verification.message
+        paystackMessage: verification.message,
+        paystackData: verification.data
       });
     }
+
+    // Double-check amount (minor units)
+    console.log(`[Verify/Amount] Checking ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);
     if (verification.data.amount !== transaction.amount) {
       console.warn(`[Amount] Mismatch ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);
-      if (process.env.NODE_ENV === "production") {
+      if (process.env.NODE_ENV === "production" || true) { // Always fail on mismatch for now to debug
         await db.updateTransactionFailed(finalRef);
-        return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
+        return res.status(402).json({
+          error: "Payment amount mismatch.",
+          expected: transaction.amount,
+          received: verification.data.amount
+        });
       }
-      console.warn("[Amount] Continuing in non-production mode despite mismatch");
     }
     await db.updateTransactionSuccess(finalRef, verification.data);
     const reviewToken = await triggerReview(transaction);
