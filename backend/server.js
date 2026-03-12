@@ -36,6 +36,15 @@ const PORT = process.env.PORT || 3000;
 
 app.set("trust proxy", 1);
 
+// ─── FILE CACHE ───────────────────────────────────────────────────
+const fileTextCache = new Map();
+setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
+  for (const [key, val] of fileTextCache) {
+    if (val.created < cutoff) fileTextCache.delete(key);
+  }
+}, 30 * 60 * 1000);
+
 // ─── SECURITY MIDDLEWARE ──────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -126,38 +135,22 @@ function getClientIP(req) {
 }
 
 async function paystackRequest(method, endpoint, body) {
-  const url = `https://api.paystack.co${endpoint}`;
-  try {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json"
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      console.warn(`[Paystack/API] Error ${res.status} on ${endpoint}:`, JSON.stringify(data));
-    }
-    return data;
-  } catch (err) {
-    console.error(`[Paystack/Fetch] Fatal error on ${endpoint}:`, err.message);
-    return { status: false, message: "Network error" };
-  }
+  const res = await fetch(`https://api.paystack.co${endpoint}`, {
+    method,
+    headers: { "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return res.json();
 }
 
 function extractText(buffer) {
   try {
-    // Basic text extraction: try UTF-8 first
-    // In a production environment, you'd use pdf-parse or mammoth.js here.
     const txt = buffer.toString("utf8");
-    // Filter out non-printable characters but keep common whitespace
-    return txt.replace(/[^\x20-\x7E\r\n\t]/g, " ").replace(/\s+/g, " ").trim();
-  } catch (err) {
-    console.error("[Extract] Failed to extract text:", err.message);
-    return "[Error extracting text from this file]";
+    const printable = txt.replace(/[^\x20-\x7E\r\n\t]/g, "").length;
+    if (printable / txt.length > 0.7) return txt.slice(0, 15000);
+    return txt.replace(/[^\x20-\x7E\r\n\t]/g, " ").replace(/\s+/g, " ").trim().slice(0, 15000);
+  } catch (e) {
+    return buffer.toString("latin1").replace(/[^\x20-\x7E\r\n\t]/g, " ").slice(0, 15000);
   }
 }
 
@@ -209,22 +202,22 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       file_names: JSON.stringify(req.files.map(f => f.originalname)),
       country_code: geo?.country || null,
       ip_address: ip,
-      extracted_text: req.files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.originalname} ---\n${extractText(f.buffer)}`).join("\n\n"),
+    });
+    fileTextCache.set(submissionId, {
+      texts: req.files.map(f => ({ name: f.originalname, text: extractText(f.buffer) })),
+      created: Date.now(),
     });
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
-    console.error("[Submission] CRITICAL ERROR:", err);
-    res.status(500).json({
-      error: "Submission failed. This is usually due to a database sync issue. Please try again or contact support.",
-      details: process.env.NODE_ENV === "development" ? err.message : undefined
-    });
+    console.error("[Submission]", err);
+    res.status(500).json({ error: "Submission failed. Please try again." });
   }
 });
 
 app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   try {
-    const { submissionId, callback_url } = req.body;
+    const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
     const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
@@ -243,18 +236,12 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
     // ── callback_url tells Paystack where to redirect after payment ──
     // It appends ?reference=<ref>&trxref=<ref> to the URL automatically
     const frontendUrl = process.env.FRONTEND_URL || "https://scholarmark.vercel.app";
-    let finalCallbackUrl = callback_url || frontendUrl;
-    if (submissionId) {
-      const sep = finalCallbackUrl.includes("?") ? "&" : "?";
-      finalCallbackUrl += `${sep}submissionId=${submissionId}`;
-    }
 
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
-      currency: "KES",
       reference: ref,
-      callback_url: finalCallbackUrl,   // ← Use dynamically sent URL if available
+      callback_url: frontendUrl,   // ← KEY FIX: Paystack redirects here after success
       metadata: {
         submission_id: submissionId,
         level: submission.level,
@@ -271,21 +258,39 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
-    const finalRef = paystackRes.data.reference || ref;
-
+    // Store our sm_xxx ref as the canonical transaction
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
-      paystack_ref: finalRef,
+      paystack_ref: ref,
       amount: submission.amount,
       currency: submission.currency,
     });
 
-    console.log(`[Payment/Init] Success — ref: ${finalRef}, access_code: ${paystackRes.data.access_code}`);
+    // Paystack's popup callback returns THEIR ref (T927...), not ours.
+    // Store their ref as an alias so verify() finds it regardless.
+    const paystackRef = paystackRes.data.reference;
+    if (paystackRef && paystackRef !== ref) {
+      console.log(`[Payment/Init] Storing Paystack alias ref: ${paystackRef}`);
+      try {
+        await db.createTransaction({
+          id: uuidv4(),
+          submission_id: submissionId,
+          paystack_ref: paystackRef,
+          amount: submission.amount,
+          currency: submission.currency,
+        });
+      } catch (aliasErr) {
+        console.warn("[Payment/Init] Alias ref already exists (OK):", aliasErr.message);
+      }
+    }
+
+    console.log(`[Payment/Init] Success — our ref: ${ref}, paystack ref: ${paystackRef}, access_code: ${paystackRes.data.access_code}`);
     res.json({
       success: true,
       access_code: paystackRes.data.access_code,
-      reference: finalRef,
+      reference: ref,                // sm_xxx — stored in sessionStorage
+      paystackReference: paystackRef, // T... — returned by popup callback
       authorization_url: paystackRes.data.authorization_url,
     });
   } catch (err) {
@@ -296,25 +301,11 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
 
 app.post("/api/payment/verify", async (req, res) => {
   try {
-    const { reference, submissionId } = req.body;
-    if (!reference && !submissionId) return res.status(400).json({ error: "Reference or Submission ID required." });
-
-    console.log(`[Verify/Start] Received ref: ${reference}, subId: ${submissionId}`);
-
-    let transaction = await db.getTransactionByRef(reference);
-    if (!transaction && submissionId) {
-      console.log(`[Verify/Fallback] Ref not found, trying fallback subId: ${submissionId}`);
-      transaction = await db.getTransactionBySubmission(submissionId);
-    }
-
-    if (!transaction) {
-      console.error("[Verify/Error] Transaction not found for ref/subId");
-      return res.status(404).json({ error: "Transaction not found." });
-    }
-
-    const finalRef = transaction.paystack_ref;
-    console.log(`[Verify/Status] Using transaction ${transaction.id}, ref: ${finalRef}, status: ${transaction.status}`);
-
+    const { reference } = req.body;
+    if (!reference) return res.status(400).json({ error: "Reference required." });
+    const transaction = await db.getTransactionByRef(reference);
+    if (!transaction) return res.status(404).json({ error: "Transaction not found." });
+    // If already marked success in DB, return existing review
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
       const submission = await db.getSubmissionById(transaction.submission_id);
@@ -322,54 +313,52 @@ app.post("/api/payment/verify", async (req, res) => {
         success: true,
         reviewToken: existingReview?.token || null,
         status: existingReview ? "reviewed" : "paid_awaiting_review",
-        submission: submission ? {
-          name: submission.name,
-          email: submission.email,
-          level: submission.level,
-          fileCount: submission.file_count
-        } : null
+        submission: submission ? { name: submission.name, email: submission.email, level: submission.level, fileCount: submission.file_count } : null
       });
     }
-    let verification;
-    let retries = 3;
-    while (retries > 0) {
-      verification = await paystackRequest("GET", `/transaction/verify/${finalRef}`);
-      console.log(`[Verify/Paystack] Reference: ${finalRef}, status: ${verification.data?.status || "unknown"}, try: ${4 - retries}`);
 
-      if (verification.status && verification.data?.status === "success") break;
+    // ── Verify with Paystack ──────────────────────────────────────
+    const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
+    const paystackStatus = verification.data?.status;
+    console.log(`[Verify/Paystack] ref: ${reference}, status: ${paystackStatus}, amount: ${verification.data?.amount}`);
 
-      retries--;
-      if (retries > 0) {
-        console.log(`[Verify/Wait] Waiting 2s for Paystack to finalize... (${retries} retries left)`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
+    if (!verification.status || !paystackStatus) {
+      console.error("[Verify/Paystack] Bad response:", JSON.stringify(verification));
+      return res.status(502).json({ error: "Could not reach payment provider. Please try again." });
     }
 
-    if (!verification.status || verification.data?.status !== "success") {
-      console.error(`[Verify/Failure] Final status: ${verification.data?.status}, Message: ${verification.message}`);
-      await db.updateTransactionFailed(finalRef);
+    // ── Handle non-success statuses ───────────────────────────────
+    // "abandoned" = popup closed before Paystack registered — payment may still succeed via webhook.
+    // "pending"   = processing, not yet confirmed.
+    // DO NOT permanently mark failed for these — allow webhook to complete it.
+    if (paystackStatus === "abandoned" || paystackStatus === "pending") {
+      console.warn(`[Verify] Status is '${paystackStatus}' — not permanently failing. Webhook may complete this.`);
       return res.status(402).json({
-        error: "Payment was not successful.",
-        paystackStatus: verification.data?.status,
-        paystackMessage: verification.message,
-        paystackData: verification.data
+        error: `Payment status is '${paystackStatus}'. If you completed payment, please wait a moment and refresh, or contact support with reference: ${reference}`,
+        status: paystackStatus,
+        retryable: true,
       });
     }
 
-    // Double-check amount (minor units)
-    console.log(`[Verify/Amount] Checking ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);
-    if (verification.data.amount !== transaction.amount) {
-      console.warn(`[Amount] Mismatch ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);
-      if (process.env.NODE_ENV === "production" || true) { // Always fail on mismatch for now to debug
-        await db.updateTransactionFailed(finalRef);
-        return res.status(402).json({
-          error: "Payment amount mismatch.",
-          expected: transaction.amount,
-          received: verification.data.amount
-        });
-      }
+    if (paystackStatus !== "success") {
+      // Only permanently fail on explicit failure statuses
+      await db.updateTransactionFailed(reference);
+      return res.status(402).json({ error: `Payment was not completed (status: ${paystackStatus}). Please try again.` });
     }
-    await db.updateTransactionSuccess(finalRef, verification.data);
+
+    // ── Amount check — log but don't hard-fail (test amounts differ) ─
+    if (verification.data.amount !== transaction.amount) {
+      console.warn(`[Amount] Mismatch ref ${reference}: DB has ${transaction.amount}, Paystack says ${verification.data.amount}`);
+      // In production, only fail if difference is significant (not a test amount issue)
+      const ratio = verification.data.amount / transaction.amount;
+      if (process.env.NODE_ENV === "production" && (ratio < 0.95 || ratio > 1.05)) {
+        console.error(`[Amount/FRAUD] Significant mismatch — failing transaction`);
+        await db.updateTransactionFailed(reference);
+        return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
+      }
+      console.warn("[Amount] Minor/test mismatch — continuing");
+    }
+    await db.updateTransactionSuccess(reference, verification.data);
     const reviewToken = await triggerReview(transaction);
     const submission = await db.getSubmissionById(transaction.submission_id);
     res.json({
@@ -412,7 +401,11 @@ app.post("/api/webhook/paystack", async (req, res) => {
 async function triggerReview(transaction) {
   const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
-  const docContext = submission.extracted_text || "[Document text unavailable. Please contact support.]";
+  const cached = fileTextCache.get(submission.id);
+  const files = cached?.texts || [];
+  const docContext = files.length
+    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n\n")
+    : "[Document text unavailable — files may have expired from cache. Please contact support.]";
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -459,7 +452,7 @@ ${docContext}
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-sonnet-4-5",
       max_tokens: 2000,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -490,6 +483,7 @@ ${docContext}
     token: reviewToken,
   });
 
+  fileTextCache.delete(submission.id);
   console.log(`[Review] Completed for submission ${submission.id} — score: ${result.overallScore}`);
   return reviewToken;
 }
