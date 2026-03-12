@@ -2,15 +2,15 @@
  * app.js — ScholarMark Frontend
  * API_BASE must be defined globally by config.js (loaded before this file)
  *
- * KEY FIX: Paystack's popup callback returns THEIR internal reference (T927...)
- * which is NOT stored in our DB. We always store and use OUR sm_xxx reference.
+ * PAYMENT FLOW: Always redirect to Paystack — no popup.
+ * Popup causes "abandoned" status even on successful payment.
+ * Redirect flow gives reliable "success" status every time.
  */
 
 const S = {
   step: "upload", files: [], level: "Level 7", name: "", email: "",
   currency: "KES", prices: {}, country: "KE", submissionId: null,
   paystackKey: null, reviewToken: null, review: null, progress: 0,
-  pendingRef: null,
 };
 
 const MAX_FILES = 10;
@@ -77,7 +77,7 @@ function clearFieldError(inputId) {
 // ─── INIT ─────────────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", async () => {
 
-  // ── ALWAYS set prices first — renderWidget() needs them ───────
+  // Always set prices first — needed before any renderWidget() call
   S.prices = {
     "Level 7": { formatted: "KES 1,500", minor: 150000, currency: "KES", amount: 1500 },
     "Level 8": { formatted: "KES 2,500", minor: 250000, currency: "KES", amount: 2500 },
@@ -91,35 +91,38 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── Check if returning from Paystack redirect ──────────────────
   const urlParams = new URLSearchParams(window.location.search);
   const urlRef = urlParams.get("reference") || urlParams.get("trxref");
+  const urlSubId = urlParams.get("submissionId");
   const stored = sessionStorage.getItem("scholarmark_payment") || localStorage.getItem("scholarmark_payment_backup");
 
-  if (urlRef && stored) {
-    console.log("[Payment] Returning from Paystack redirect, url ref:", urlRef);
+  if ((urlRef || urlSubId) && stored) {
+    console.log("[Redirect] Returning from Paystack — urlRef:", urlRef, "subId:", urlSubId);
     try {
       const paymentData = JSON.parse(stored);
-      S.submissionId = paymentData.submissionId || null;
+      S.submissionId = paymentData.submissionId || urlSubId || null;
       S.email = paymentData.email || "";
       S.level = paymentData.level || "Level 7";
       S.name = paymentData.name || "";
       S.files = Array.from({ length: paymentData.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
+
+      // Use our canonical sm_xxx ref from storage — not Paystack's URL param
+      const ourRef = paymentData.reference || urlRef;
+      console.log("[Redirect] Verifying with ref:", ourRef);
+
       sessionStorage.removeItem("scholarmark_payment");
       localStorage.removeItem("scholarmark_payment_backup");
       window.history.replaceState({}, document.title, window.location.pathname);
+
       S.step = "processing";
       renderWidget();
       document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      // KEY FIX: use OUR stored sm_xxx ref, not Paystack's URL param (T...)
-      const ourRef = paymentData.reference || urlRef;
-      console.log("[Payment] Verifying with our ref:", ourRef);
       await verifyPayment(ourRef);
       return;
     } catch (e) {
       console.error("[Redirect] Error:", e);
-      showErr("Payment completed but there was an error. Contact support with ref: " + urlRef);
+      showGlobalErr("Payment completed but there was an error loading your review. Contact support with ref: " + urlRef);
     }
   }
 
-  // ── Normal page load ───────────────────────────────────────────
   renderWidget();
   loadLocationAndPricing().then(() => { updatePricingUI(); if (S.step === "upload") renderWidget(); });
   loadPaystackKey();
@@ -227,7 +230,7 @@ ${S.files.map((f, i) => `
 </div>`).join("")}
 </div>
 <div class="file-count">${S.files.length} file${S.files.length !== 1 ? "s" : ""} ready${S.files.length < MAX_FILES ? " — you may add more" : ""}</div>
-`: ""}
+` : ""}
 </div>
 <button class="btn-w" type="button" ${S.files.length === 0 ? "disabled" : ""} onclick="toPayment()">
 Continue — ${priceForLevel}
@@ -240,7 +243,11 @@ function liveValidateEmail(input) { setFieldError("emailIn", validateEmail(input
 function bindUpload() {
   const fi = document.getElementById("fi"), dz = document.getElementById("dz");
   if (fi) fi.onchange = e => addFiles(Array.from(e.target.files));
-  if (dz) { dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); }; dz.ondragleave = () => dz.classList.remove("over"); dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); addFiles(Array.from(e.dataTransfer.files)); }; }
+  if (dz) {
+    dz.ondragover = e => { e.preventDefault(); dz.classList.add("over"); };
+    dz.ondragleave = () => dz.classList.remove("over");
+    dz.ondrop = e => { e.preventDefault(); dz.classList.remove("over"); addFiles(Array.from(e.dataTransfer.files)); };
+  }
 }
 
 function addFiles(newFiles) {
@@ -269,18 +276,17 @@ async function toPayment() {
   try {
     if (typeof API_BASE === "undefined") throw new Error("API_BASE not defined");
     const form = new FormData();
-    form.append("name", S.name); form.append("email", S.email || "pending@scholarmark.co.ke");
-    form.append("level", S.level); form.append("currency", S.currency);
+    form.append("name", S.name);
+    form.append("email", S.email || "pending@scholarmark.co.ke");
+    form.append("level", S.level);
+    form.append("currency", S.currency);
     S.files.forEach(f => form.append("files", f));
     const res = await fetch(`${API_BASE}/api/submission`, { method: "POST", body: form, credentials: "include" });
     const data = await res.json();
-    if (!res.ok || !data.success) {
-      console.error("[Submission] Details:", data.details);
-      return showErr(data.error || "Upload failed. Please try again.");
-    }
+    if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
     S.submissionId = data.submissionId;
     S.step = "payment"; renderWidget();
-  } catch (e) { console.error("[Submission] Error:", e); showErr("Network error. Please check your connection."); }
+  } catch (e) { console.error("[Submission]", e); showErr("Network error. Please check your connection."); }
   finally { if (btn) btn.disabled = false; }
 }
 
@@ -312,7 +318,6 @@ async function doPayment() {
   const emailErr = validateEmail(em || "");
   if (emailErr) { setFieldError("emailIn", emailErr); showErr(emailErr); return; }
   S.email = em;
-  if (!S.paystackKey) return showErr("Payment system not ready. Please refresh and try again.");
   if (!S.submissionId) return showErr("Session expired. Please start again.");
 
   const btn = document.querySelector(".btn-w");
@@ -324,66 +329,52 @@ async function doPayment() {
     const initRes = await fetch(`${API_BASE}/api/payment/init`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submissionId: S.submissionId, callback_url: window.location.origin }),
+      body: JSON.stringify({ submissionId: S.submissionId }),
       credentials: "include",
     });
+
     if (!initRes.headers.get("content-type")?.includes("application/json")) {
-      throw new Error(`Server returned ${initRes.status}: ${(await initRes.text()).slice(0, 200)}`);
+      throw new Error(`Server error ${initRes.status}: ${(await initRes.text()).slice(0, 200)}`);
     }
-    if (!initRes.ok) { const e = await initRes.json().catch(() => { }); throw new Error(`HTTP ${initRes.status}: ${e?.error || "Unknown"}`); }
+    if (!initRes.ok) {
+      const e = await initRes.json().catch(() => ({}));
+      throw new Error(e?.error || `HTTP ${initRes.status}`);
+    }
 
     const initData = await initRes.json();
     if (!initData.success) throw new Error(initData.error || "Payment initialization failed");
 
+    // Already paid — load review directly
     if (initData.alreadyPaid && initData.reviewToken) {
       if (btn) btn.disabled = false;
       S.step = "processing"; renderWidget();
-      await loadReview(initData.reviewToken); return;
+      await loadReview(initData.reviewToken);
+      return;
     }
 
-    console.log("[Payment] Our ref:", initData.reference, "| Paystack ref:", initData.paystackReference);
-
-    // ⚠️ KEY FIX: Store OUR sm_xxx reference — the popup returns Paystack's T... ref which we ignore
+    // ── Save to storage before redirect ──
+    // We store OUR sm_xxx ref — Paystack's redirect URL has their ref which we ignore
     const paymentData = {
       submissionId: S.submissionId,
-      reference: initData.reference,           // sm_xxx — our canonical ref stored in DB
-      paystackReference: initData.paystackReference, // T... — for debugging only
-      email: S.email, level: S.level, name: S.name,
-      fileCount: S.files.length, timestamp: Date.now(),
+      reference: initData.reference,  // sm_xxx — our canonical ref
+      email: S.email,
+      level: S.level,
+      name: S.name,
+      fileCount: S.files.length,
+      timestamp: Date.now(),
     };
     sessionStorage.setItem("scholarmark_payment", JSON.stringify(paymentData));
     localStorage.setItem("scholarmark_payment_backup", JSON.stringify(paymentData));
 
-    // ── Popup (preferred) ──────────────────────────────────────────
-    if (window.PaystackPop && typeof window.PaystackPop.setup === "function") {
-      console.log("[Payment] Using Paystack popup with access_code");
-      const handler = window.PaystackPop.setup({
-        key: S.paystackKey,
-        email: S.email,
-        amount: S.prices[S.level].minor,
-        currency: "KES",
-        access_code: initData.access_code,
-        callback: function (response) {
-          // ⚠️ KEY FIX: response.reference = Paystack's T... ref — NOT in our DB.
-          // Read OUR sm_xxx ref from sessionStorage instead.
-          console.log("[Payment] Popup callback — paystack gave ref:", response.reference);
-          const raw = sessionStorage.getItem("scholarmark_payment") || localStorage.getItem("scholarmark_payment_backup");
-          const ourRef = raw ? JSON.parse(raw).reference : initData.reference;
-          console.log("[Payment] Verifying with our ref:", ourRef);
-          setTimeout(function () { S.step = "processing"; renderWidget(); verifyPayment(ourRef); }, 0);
-        },
-        onClose: function () {
-          if (btn) { btn.disabled = false; btn.textContent = `Pay ${S.prices[S.level]?.formatted || "…"} — Secure Checkout`; }
-          showErr("Payment was cancelled. Your submission is saved.");
-        },
-      });
-      handler.openIframe();
+    // ── Always redirect — never use popup ──
+    // Popup marks payments "abandoned" even on success. Redirect is reliable.
+    if (initData.authorization_url) {
+      console.log("[Payment] Redirecting to Paystack:", initData.authorization_url);
+      window.location.href = initData.authorization_url;
       return;
     }
 
-    // ── Redirect fallback ──────────────────────────────────────────
-    if (initData.authorization_url) { console.log("[Payment] Redirecting to Paystack..."); window.location.href = initData.authorization_url; return; }
-    throw new Error("Payment method not available");
+    throw new Error("No payment URL received from server.");
 
   } catch (e) {
     console.error("[Payment] Exception:", e.message);
@@ -394,7 +385,14 @@ async function doPayment() {
 
 // ─── PROCESSING ───────────────────────────────────────────────────
 function renderProcessing() {
-  const stages = [[5, "Receiving your submission"], [18, "Reading all uploaded documents"], [34, "Cross-referencing guidelines & rubrics"], [50, "Evaluating against academic criteria"], [67, "Drafting improvement plan"], [83, "Compiling your written report"]];
+  const stages = [
+    [5, "Receiving your submission"],
+    [18, "Reading all uploaded documents"],
+    [34, "Cross-referencing guidelines & rubrics"],
+    [50, "Evaluating against academic criteria"],
+    [67, "Drafting improvement plan"],
+    [83, "Compiling your written report"],
+  ];
   return `<div class="proc-wrap" aria-live="polite">
 <div class="proc-spin"></div>
 <h3 class="proc-h">Reviewing your submission</h3>
@@ -408,31 +406,50 @@ ${stages.map(([t, lbl]) => `<div class="proc-step${S.progress >= t + 15 ? " done
 
 // ─── VERIFY ───────────────────────────────────────────────────────
 async function verifyPayment(reference) {
-  console.log("[Verify] Verifying ref:", reference);
+  console.log("[Verify] ref:", reference, "subId:", S.submissionId);
   S.progress = 8;
-  const iv = setInterval(function () { if (S.progress < 85) S.progress = Math.min(85, S.progress + Math.random() * 5 + 2); updateProgress(); }, 800);
+  const iv = setInterval(() => { if (S.progress < 85) { S.progress = Math.min(85, S.progress + Math.random() * 5 + 2); updateProgress(); } }, 800);
   try {
     if (typeof API_BASE === "undefined") throw new Error("API_BASE not defined");
     const res = await fetch(`${API_BASE}/api/payment/verify`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reference, submissionId: S.submissionId }), credentials: "include",
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reference, submissionId: S.submissionId }),
+      credentials: "include",
     });
-    const data = await res.json(); clearInterval(iv);
+    const data = await res.json();
+    clearInterval(iv);
+
     if (!res.ok || !data.success) {
       console.error("[Verify] Failed:", data);
-      // Retryable: abandoned / pending (M-Pesa, slow networks)
-      if (data.retryable || data.status === "abandoned" || data.status === "pending") {
-        S.pendingRef = reference; // Store for retryVerify()
+      // Pending — genuinely still processing (e.g. slow M-Pesa confirm)
+      if (data.retryable) {
         showPendingScreen(reference, data.error);
         return;
       }
+      // Abandoned — payment was NOT completed, go back so user can try again
       S.step = "payment"; renderWidget();
-      showErr(data.error || "Verification failed. Ref: " + reference);
+      showErr(data.error || "Payment not completed. Please try again.");
       return;
     }
-    if (data.submission) { S.name = data.submission.name || S.name; S.email = data.submission.email || S.email; S.level = data.submission.level || S.level; if (!S.files.length || S.files[0]?.name?.startsWith("File")) S.files = Array.from({ length: data.submission.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` })); }
+
+    // Restore state from server response (needed after redirect wipes memory)
+    if (data.submission) {
+      S.name = data.submission.name || S.name;
+      S.email = data.submission.email || S.email;
+      S.level = data.submission.level || S.level;
+      if (!S.files.length || S.files[0]?.name?.startsWith("File")) {
+        S.files = Array.from({ length: data.submission.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
+      }
+    }
+
     await loadReview(data.reviewToken);
-  } catch (e) { clearInterval(iv); console.error("[Verify] Error:", e); S.step = "payment"; renderWidget(); showErr("Network error during verification. Ref: " + reference); }
+  } catch (e) {
+    clearInterval(iv);
+    console.error("[Verify] Error:", e);
+    S.step = "payment"; renderWidget();
+    showErr("Network error during verification. Ref: " + reference);
+  }
 }
 
 async function loadReview(token) {
@@ -443,17 +460,43 @@ async function loadReview(token) {
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.error || "Review not found");
     S.review = data.result; S.progress = 100; updateProgress(); S.step = "results";
-    setTimeout(function () { renderWidget(); document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "start" }); }, 400);
-  } catch (e) { console.error("[Review] Error:", e); S.step = "payment"; renderWidget(); showErr("Could not load review. Please contact support."); }
+    setTimeout(() => { renderWidget(); document.getElementById("widget")?.scrollIntoView({ behavior: "smooth", block: "start" }); }, 400);
+  } catch (e) {
+    console.error("[Review]", e);
+    S.step = "payment"; renderWidget();
+    showErr("Could not load review. Please contact support.");
+  }
 }
 
 function updateProgress() {
   const fill = document.getElementById("pFill"), pct = document.getElementById("pPct");
-  if (fill) fill.style.width = S.progress + "%"; if (pct) pct.textContent = Math.round(S.progress) + "%";
-  document.querySelectorAll(".proc-step").forEach(function (el) {
+  if (fill) fill.style.width = S.progress + "%";
+  if (pct) pct.textContent = Math.round(S.progress) + "%";
+  document.querySelectorAll(".proc-step").forEach(el => {
     const t = parseInt(el.id.replace("ps", "")), lbl = el.textContent.replace(" ✓", "").trim();
     el.className = "proc-step" + (S.progress >= t + 15 ? " done" : S.progress >= t ? " active" : "");
     el.innerHTML = `<div class="ps-d"></div>${lbl}${S.progress >= t + 15 ? " ✓" : ""}`;
+  });
+}
+
+// ─── PENDING SCREEN (only for genuine pending/processing) ─────────
+function showPendingScreen(reference, message) {
+  const titleEl = document.getElementById("widgetTitle");
+  if (titleEl) titleEl.textContent = "Payment Processing";
+  const body = document.getElementById("widgetBody");
+  if (!body) return;
+  body.innerHTML = `
+<div style="text-align:center;padding:32px 16px">
+  <div style="font-size:2.5rem;margin-bottom:16px">⏳</div>
+  <h3 style="font-family:var(--serif,serif);color:#002147;margin-bottom:12px;font-size:1.25rem">Payment Processing</h3>
+  <p style="color:#555;margin-bottom:8px;line-height:1.6;font-size:0.9rem">${message || "Your payment is being confirmed."}</p>
+  <p style="font-size:0.8rem;color:#888;margin-bottom:24px">Ref: <code style="background:#f0f4f8;padding:2px 6px;border-radius:3px">${reference}</code></p>
+  <button class="btn-w" id="retryBtn" type="button" style="margin-bottom:12px">🔄 Check Payment Status</button>
+  <p style="font-size:0.75rem;color:#aaa">M-Pesa payments can take 1–2 minutes to confirm.</p>
+</div>`;
+  document.getElementById("retryBtn")?.addEventListener("click", function () {
+    this.disabled = true; this.textContent = "Checking…";
+    verifyPayment(reference);
   });
 }
 
@@ -461,7 +504,8 @@ function updateProgress() {
 function renderResults() {
   const r = S.review; if (!r) return "<p>No results available.</p>";
   const sc = s => s >= 70 ? "var(--oxford)" : s >= 50 ? "#a16207" : "#b91c1c";
-  const strengths = r.strengths || [], weaknesses = r.criticalWeaknesses || [], criteria = Object.entries(r.criteriaScores || {}), plan = r.improvementPlan || [], resources = r.recommendedResources || [];
+  const strengths = r.strengths || [], weaknesses = r.criticalWeaknesses || [];
+  const criteria = Object.entries(r.criteriaScores || {}), plan = r.improvementPlan || [], resources = r.recommendedResources || [];
   return `<div class="res-scroll">
 <div class="res-score-header">
 <div class="res-score-box"><div class="rsb-n">${r.overallScore || 0}</div><div class="rsb-d">/ 100</div></div>
@@ -470,7 +514,7 @@ function renderResults() {
 <div class="res-blk"><div class="res-lbl">Strengths</div><div class="tags-r">${strengths.length ? strengths.map(s => `<span class="tg tg-g">✓ ${esc(s)}</span>`).join("") : "No specific strengths noted."}</div></div>
 <div class="res-blk"><div class="res-lbl">Weaknesses</div><div class="tags-r">${weaknesses.length ? weaknesses.map(w => `<span class="tg tg-r">✗ ${esc(w)}</span>`).join("") : "No specific weaknesses noted."}</div></div>
 <div class="res-blk"><div class="res-lbl">Criteria Scores</div><div class="crit-list">
-${criteria.length ? criteria.map(([n, d]) => { const sc2 = d?.score || 0; return `<div><div class="crit-row"><div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(d?.feedback || "")}</div></div><div class="cr-score" style="color:${sc(sc2)}">${sc2}</div></div><div class="cr-bar"><div class="cr-fill" style="width:${sc2}%;background:${sc(sc2)}"></div></div></div>`; }).join("") : "Unavailable."}
+${criteria.length ? criteria.map(([n, d]) => { const s = d?.score || 0; return `<div><div class="crit-row"><div><div class="cr-name">${esc(n)}</div><div class="cr-fb">${esc(d?.feedback || "")}</div></div><div class="cr-score" style="color:${sc(s)}">${s}</div></div><div class="cr-bar"><div class="cr-fill" style="width:${s}%;background:${sc(s)}"></div></div></div>`; }).join("") : "Unavailable."}
 </div></div>
 <div class="res-blk"><div class="res-lbl">Improvement Plan</div><div class="imp-list">
 ${plan.length ? plan.map(i => { const pri = i?.priority || "Low"; return `<div class="imp-item"><span class="imp-pri p${pri[0]}">${esc(pri)}</span><div><div class="imp-area">${esc(i?.area || "")}</div><div class="imp-action">${esc(i?.action || "")} — <em>${esc(i?.rationale || "")}</em></div></div></div>`; }).join("") : "No specific actions."}
@@ -488,7 +532,8 @@ function resetApp() { S.step = "upload"; S.files = []; S.name = ""; S.email = ""
 // ─── PDF ──────────────────────────────────────────────────────────
 function downloadReport() {
   const r = S.review; if (!r) return;
-  const sc = s => s >= 70 ? "#1d4ed8" : s >= 50 ? "#a16207" : "#b91c1c", sf = s => s >= 70 ? "#deedf9" : s >= 50 ? "#fef9c3" : "#fee2e2";
+  const sc = s => s >= 70 ? "#1d4ed8" : s >= 50 ? "#a16207" : "#b91c1c";
+  const sf = s => s >= 70 ? "#deedf9" : s >= 50 ? "#fef9c3" : "#fee2e2";
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>ScholarMark Report — ${esc(S.name)}</title><link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Outfit:wght@300;400;500;600&family=JetBrains+Mono:wght@300;400&display=swap" rel="stylesheet"><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Outfit',sans-serif;background:#fff;color:#1a1a1a;font-size:10.5pt;line-height:1.65}.cover{background:#002147;color:#f5f5f5;padding:52px 48px}.c-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px}.c-brand{font-family:'EB Garamond',serif;font-size:1.1rem;color:rgba(185,214,242,0.5)}.c-badge{font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.18em;text-transform:uppercase;color:rgba(185,214,242,0.3);background:rgba(185,214,242,0.07);border:1px solid rgba(185,214,242,0.12);padding:4px 10px;border-radius:2px}h1{font-family:'EB Garamond',serif;font-size:26pt;font-weight:400;line-height:1.1;color:white;margin-bottom:6px}h1 em{font-style:italic;color:#b9d6f2}.c-sub{font-family:'JetBrains Mono',monospace;font-size:7pt;color:rgba(185,214,242,0.3);letter-spacing:0.14em;text-transform:uppercase;margin-bottom:32px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:14px}.mi{border-top:1px solid rgba(185,214,242,0.1);padding-top:11px}.mi label{font-family:'JetBrains Mono',monospace;font-size:6pt;text-transform:uppercase;letter-spacing:0.18em;opacity:0.35;display:block;margin-bottom:3px}.mi value{font-size:9.5pt;font-weight:500;display:block;color:#e8f2fb}.sb{display:flex;align-items:center;gap:22px;padding:22px 48px;background:#f0f7fd;border-bottom:2px solid #deedf9}.ss{width:76px;height:76px;border:2px solid #002147;background:${sf(r.overallScore)};display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:4px;flex-shrink:0}.sn{font-family:'EB Garamond',serif;font-size:24pt;color:${sc(r.overallScore)};line-height:1}.sd{font-family:'JetBrains Mono',monospace;font-size:6.5pt;color:#8a8680}.si h2{font-family:'EB Garamond',serif;font-size:16pt;color:#002147;font-style:italic;margin-bottom:5px}.si p{font-size:8.5pt;color:#555;line-height:1.7;max-width:500px}.sec{padding:20px 48px;border-bottom:1px solid #e8e4df}.sec h3{font-family:'EB Garamond',serif;font-size:11pt;color:#002147;font-style:italic;margin-bottom:10px;display:flex;align-items:center;gap:8px}.sec h3::after{content:'';flex:1;height:1px;background:#e8e4df}.tags{display:flex;flex-wrap:wrap;gap:6px}.tg{padding:3px 9px;border-radius:100px;font-size:7.5pt}.tg-g{background:#dcfce7;color:#15803d;border:1px solid #86efac}.tg-r{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5}.cg{display:grid;grid-template-columns:1fr 1fr;gap:9px}.ci{border:1px solid #e8e4df;padding:11px;border-radius:3px}.cn{font-family:'JetBrains Mono',monospace;font-size:6.5pt;text-transform:uppercase;letter-spacing:0.1em;color:#8a8680;margin-bottom:2px}.cs{font-family:'EB Garamond',serif;font-size:17pt;line-height:1}.bar{height:2px;background:#e8e4df;border-radius:1px;margin:4px 0}.bf{height:2px;border-radius:1px}.cf{font-size:8pt;color:#555;line-height:1.55}table{width:100%;border-collapse:collapse}th{background:#002147;color:#f0f7fd;padding:7px 11px;text-align:left;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em;text-transform:uppercase}td{padding:8px 11px;border-bottom:1px solid #f0f0ec;font-size:8.5pt;vertical-align:top}tr:nth-child(even) td{background:#fafaf8}.pb{padding:2px 6px;border-radius:2px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;font-weight:700}.pH{background:#fee2e2;color:#b91c1c}.pM{background:#fef9c3;color:#a16207}.pL{background:#dcfce7;color:#15803d}.rb{display:inline-block;background:#deedf9;border:1px solid #b9d6f2;color:#002147;padding:5px 14px;border-radius:3px;font-size:9pt;font-weight:500}.note{border-left:3px solid #002147;padding:13px 16px;background:#f0f7fd;font-family:'EB Garamond',serif;font-style:italic;color:#2c2c2c;line-height:1.8;font-size:9.5pt}ul.rl{list-style:none}ul.rl li{padding:6px 11px 6px 22px;background:#fafaf8;border-radius:2px;font-size:8.5pt;color:#555;position:relative;margin-bottom:4px}ul.rl li::before{content:"→";position:absolute;left:7px;color:#002147}.footer{background:#002147;color:rgba(185,214,242,0.2);text-align:center;padding:11px;font-family:'JetBrains Mono',monospace;font-size:6.5pt;letter-spacing:0.1em}@media print{*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body>
 <div class="cover"><div class="c-top"><div class="c-brand">ScholarMark</div><div class="c-badge">Academic Review Report</div></div><h1>Academic Review &<br/><em>Improvement Report</em></h1><div class="c-sub">Confidential · For academic improvement purposes only</div><div class="meta"><div class="mi"><label>Author</label><value>${esc(S.name || "—")}</value></div><div class="mi"><label>Documents submitted</label><value>${S.files.length} file${S.files.length !== 1 ? "s" : ""}</value></div><div class="mi"><label>Academic Level</label><value>${esc(S.level)} — ${esc(LEVEL_DATA[S.level]?.sub || "")}</value></div><div class="mi"><label>Date</label><value>${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</value></div></div></div>
 <div class="sb"><div class="ss"><span class="sn">${r.overallScore}</span><span class="sd">/ 100</span></div><div class="si"><h2>${esc(r.grade)}</h2><p>${esc(r.executiveSummary)}</p></div></div>
@@ -529,47 +574,14 @@ function setupHeroParticles() {
 function setupHeroCardFloat() { const card = document.querySelector(".hero-card"); if (!card) return; if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { fillHeroBars(0); return; } setTimeout(() => { card.classList.add("loaded"); fillHeroBars(300); }, 2200); }
 function fillHeroBars(extraDelay) { document.querySelectorAll(".hc-bar-f").forEach((bar, i) => { const target = bar.style.width || "70%"; bar.style.setProperty("--bar-w", target); bar.style.width = "0"; setTimeout(() => bar.classList.add("animated"), extraDelay + i * 180); }); }
 function setupReveal() { const ro = new IntersectionObserver((entries) => { entries.forEach((e, i) => { if (e.isIntersecting) { setTimeout(() => e.target.classList.add("in"), i * 70); ro.unobserve(e.target); } }); }, { threshold: 0.1 }); document.querySelectorAll(".reveal").forEach(el => ro.observe(el)); }
+
 function esc(s) { if (typeof s !== "string") return String(s ?? ""); return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function showErr(msg) { const el = document.getElementById("errBox"); if (!el) return; el.textContent = msg; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 7000); }
-
-
-// ─── PENDING PAYMENT SCREEN ───────────────────────────────────────
-function showPendingScreen(reference, message) {
-  S.step = "processing";
-  S.pendingRef = reference;
-  // Update widget title
-  const titleEl = document.getElementById("widgetTitle");
-  if (titleEl) titleEl.textContent = "Payment Pending";
-  syncDots();
-  const body = document.getElementById("widgetBody");
-  if (!body) return;
-  body.innerHTML = `
-<div style="text-align:center;padding:32px 16px">
-  <div style="font-size:2.5rem;margin-bottom:16px">⏳</div>
-  <h3 style="font-family:var(--serif,serif);color:#002147;margin-bottom:12px;font-size:1.25rem">Payment Pending</h3>
-  <p style="color:#555;margin-bottom:8px;line-height:1.6;font-size:0.9rem">${message || "Your payment is being processed."}</p>
-  <p style="font-size:0.8rem;color:#888;margin-bottom:24px">Ref: <code style="background:#f0f4f8;padding:2px 6px;border-radius:3px;font-size:0.75rem">${reference}</code></p>
-  <button class="btn-w" id="retryBtn" type="button" style="margin-bottom:12px">🔄 Check Payment Status</button>
-  <p style="font-size:0.75rem;color:#aaa">If you paid via M-Pesa, allow 1–2 minutes then click Check.</p>
-</div>`;
-  // Attach event listener — avoids inline onclick issues entirely
-  const retryBtn = document.getElementById("retryBtn");
-  if (retryBtn) {
-    retryBtn.addEventListener("click", function () {
-      retryBtn.disabled = true;
-      retryBtn.textContent = "Checking…";
-      verifyPayment(S.pendingRef || reference);
-    });
-  }
-}
-
-function retryVerify() {
-  if (S.pendingRef) verifyPayment(S.pendingRef);
-}
+function showGlobalErr(msg) { const el = document.createElement("div"); el.style.cssText = "position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#b91c1c;color:#fff;padding:14px 24px;border-radius:8px;z-index:9999;font-size:0.9rem;max-width:90vw;text-align:center;"; el.textContent = msg; document.body.appendChild(el); setTimeout(() => el.remove(), 10000); }
 
 // ─── GLOBAL EXPORTS ───────────────────────────────────────────────
+window.pickLevel = pickLevel; window.removeFile = removeFile; window.toPayment = toPayment;
+window.doPayment = doPayment; window.downloadReport = downloadReport; window.resetApp = resetApp;
+window.liveValidateName = liveValidateName; window.liveValidateEmail = liveValidateEmail;
 window.verifyPayment = verifyPayment;
-window.retryVerify = retryVerify;
-window.showPendingScreen = showPendingScreen;
-window.pickLevel = pickLevel; window.removeFile = removeFile; window.toPayment = toPayment; window.doPayment = doPayment; window.downloadReport = downloadReport; window.resetApp = resetApp; window.liveValidateName = liveValidateName; window.liveValidateEmail = liveValidateEmail;
 window.setLevel = function (lv) { S.level = lv; document.getElementById("submit")?.scrollIntoView({ behavior: "smooth" }); };

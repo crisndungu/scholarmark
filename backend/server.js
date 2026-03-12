@@ -23,7 +23,6 @@ for (const key of FATAL_ENV) {
     process.exit(1);
   }
 }
-
 const WARN_ENV = ["PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY"];
 for (const key of WARN_ENV) {
   if (!process.env[key] || process.env[key].includes("XXXXXXX")) {
@@ -33,17 +32,7 @@ for (const key of WARN_ENV) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 app.set("trust proxy", 1);
-
-// ─── FILE CACHE ───────────────────────────────────────────────────
-const fileTextCache = new Map();
-setInterval(() => {
-  const cutoff = Date.now() - 2 * 60 * 60 * 1000;
-  for (const [key, val] of fileTextCache) {
-    if (val.created < cutoff) fileTextCache.delete(key);
-  }
-}, 30 * 60 * 1000);
 
 // ─── SECURITY MIDDLEWARE ──────────────────────────────────────────
 app.use(helmet({
@@ -54,16 +43,7 @@ app.use(helmet({
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "https://fonts.googleapis.com", "'unsafe-inline'", "https://paystack.com", "https://checkout.paystack.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com", "https://paystack.com"],
-      connectSrc: [
-        "'self'",
-        "https://scholarmark.onrender.com",
-        "https://scholarmark.vercel.app",
-        "https://scholarmark.co.ke",
-        "https://www.scholarmark.co.ke",
-        "https://api.paystack.co",
-        "https://checkout.paystack.com",
-        "https://standard.paystack.co",
-      ],
+      connectSrc: ["'self'", "https://scholarmark.onrender.com", "https://scholarmark.vercel.app", "https://scholarmark.co.ke", "https://www.scholarmark.co.ke", "https://api.paystack.co", "https://checkout.paystack.com", "https://standard.paystack.co"],
       frameSrc: ["https://checkout.paystack.com", "https://paystack.com", "https://standard.paystack.co"],
       imgSrc: ["'self'", "data:", "https://*.paystack.co", "https://paystack.com", "https://checkout.paystack.com"],
       objectSrc: ["'none'"],
@@ -74,42 +54,33 @@ app.use(helmet({
 }));
 
 const allowedOrigins = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://scholarmark.onrender.com",
-  "https://scholarmark.vercel.app",
-  "https://scholarmark.co.ke",
-  "https://www.scholarmark.co.ke",
+  "http://localhost:3000", "http://127.0.0.1:3000",
+  "https://scholarmark.onrender.com", "https://scholarmark.vercel.app",
+  "https://scholarmark.co.ke", "https://www.scholarmark.co.ke",
   ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
 ];
 
 app.use(cors({
   origin: (origin, cb) => {
-    console.log(`[CORS] Received Origin: ${origin}`);
     if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
     if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/.test(origin)) return cb(null, true);
     if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/.test(origin)) return cb(null, true);
-    console.warn(`[CORS] Blocked Origin: ${origin}`);
+    console.warn(`[CORS] Blocked: ${origin}`);
     cb(new Error("CORS: origin not allowed"));
   },
   credentials: true,
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-  exposedHeaders: ["Content-Range", "X-Content-Range"],
 }));
 
 // ─── RATE LIMITERS ────────────────────────────────────────────────
-const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: "Too many requests. Please try again shortly." } });
-const submissionLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: "Submission limit reached. Please try again in an hour." } });
-const paymentLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: "Payment request limit reached. Please try again later." } });
-
+const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: "Too many requests." } });
+const submissionLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 5, message: { error: "Submission limit reached. Try again in an hour." } });
+const paymentLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, message: { error: "Payment request limit reached." } });
 app.use("/api", generalLimiter);
 
-// ─── RAW BODY for Webhook (MUST be before express.json) ───────────
 app.use("/api/webhook/paystack", express.raw({ type: "application/json" }));
-
-// ─── BODY PARSING ─────────────────────────────────────────────────
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false, limit: "1mb" }));
 
@@ -123,7 +94,6 @@ const upload = multer({
   },
 });
 
-// ─── STATIC FILES ─────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, "../frontend"), {
   etag: true,
   maxAge: process.env.NODE_ENV === "production" ? "1d" : 0,
@@ -135,12 +105,17 @@ function getClientIP(req) {
 }
 
 async function paystackRequest(method, endpoint, body) {
-  const res = await fetch(`https://api.paystack.co${endpoint}`, {
-    method,
-    headers: { "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return res.json();
+  try {
+    const res = await fetch(`https://api.paystack.co${endpoint}`, {
+      method,
+      headers: { "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return res.json();
+  } catch (err) {
+    console.error(`[Paystack] Network error on ${endpoint}:`, err.message);
+    return { status: false, message: "Network error" };
+  }
 }
 
 function extractText(buffer) {
@@ -170,27 +145,36 @@ app.post("/api/location", async (req, res) => {
     const prices = await pricing.getPricingForCurrency(currency);
     res.json({ success: true, country: countryCode, currency, prices });
   } catch (err) {
-    console.error("[Location]", err);
     const prices = await pricing.getPricingForCurrency("KES");
     res.json({ success: true, country: "KE", currency: "KES", prices });
   }
 });
 
+// ─── SUBMISSION ───────────────────────────────────────────────────
 app.post("/api/submission", submissionLimiter, upload.array("files", 10), async (req, res) => {
   try {
-    const { name, email, level, currency } = req.body;
+    const { name, email, level } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Name is required." });
     if (!email?.includes("@")) return res.status(400).json({ error: "Valid email is required." });
     if (!level || !["Level 7", "Level 8", "Level 9", "Level 10"].includes(level))
       return res.status(400).json({ error: "Invalid academic level." });
     if (!req.files?.length) return res.status(400).json({ error: "At least one file is required." });
+
     const useCurrency = "KES";
     const prices = await pricing.getPricingForCurrency(useCurrency);
     const priceData = prices[level];
     if (!priceData) return res.status(400).json({ error: "Invalid level." });
+
     const ip = getClientIP(req);
     const geo = geoip.lookup(ip);
     const submissionId = uuidv4();
+
+    // ── KEY FIX: Save extracted text directly to DB ──
+    // Never use in-memory cache — Render restarts wipe it before review runs
+    const extractedText = req.files
+      .map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.originalname} ---\n${extractText(f.buffer)}`)
+      .join("\n\n");
+
     await db.createSubmission({
       id: submissionId,
       name: name.trim().slice(0, 200),
@@ -202,50 +186,46 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       file_names: JSON.stringify(req.files.map(f => f.originalname)),
       country_code: geo?.country || null,
       ip_address: ip,
-      extracted_text: "",
+      extracted_text: extractedText,
     });
-    fileTextCache.set(submissionId, {
-      texts: req.files.map(f => ({ name: f.originalname, text: extractText(f.buffer) })),
-      created: Date.now(),
-    });
-    console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
+
+    console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted} — text: ${extractedText.length} chars`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
     console.error("[Submission] ERROR:", err);
-    res.status(500).json({
-      error: "Submission failed. Please try again.",
-      details: err.message
-    });
+    res.status(500).json({ error: "Submission failed. Please try again.", details: err.message });
   }
 });
 
+// ─── PAYMENT INIT ─────────────────────────────────────────────────
 app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   try {
     const { submissionId } = req.body;
     if (!submissionId) return res.status(400).json({ error: "submissionId required." });
+
     const submission = await db.getSubmissionById(submissionId);
     if (!submission) return res.status(404).json({ error: "Submission not found." });
-    console.log(`[Payment/Init] Submission: id=${submission.id} amount=${submission.amount} email=${submission.email}`);
 
+    // Already paid — return existing review token
     if (await db.hasSuccessfulPayment(submissionId)) {
       const existingReview = await db.getReviewBySubmissionId(submissionId);
-      if (existingReview) {
-        return res.json({ success: true, alreadyPaid: true, reviewToken: existingReview.token });
-      }
+      if (existingReview) return res.json({ success: true, alreadyPaid: true, reviewToken: existingReview.token });
       return res.status(400).json({ error: "Already paid. Contact support if your review is missing." });
     }
 
     const ref = `sm_${uuidv4().replace(/-/g, "").slice(0, 16)}`;
-
-    // ── callback_url tells Paystack where to redirect after payment ──
-    // It appends ?reference=<ref>&trxref=<ref> to the URL automatically
     const frontendUrl = process.env.FRONTEND_URL || "https://scholarmark.vercel.app";
+
+    // ── KEY FIX: Always use redirect flow — no popup ──
+    // Redirect is reliable. Popup marks payments "abandoned" even when successful.
+    // Paystack appends ?reference=<ref>&trxref=<ref> to callback_url automatically.
+    const callbackUrl = `${frontendUrl}?submissionId=${submissionId}`;
 
     const paystackPayload = {
       email: submission.email,
       amount: submission.amount,
       reference: ref,
-      callback_url: frontendUrl,   // ← KEY FIX: Paystack redirects here after success
+      callback_url: callbackUrl,
       metadata: {
         submission_id: submissionId,
         level: submission.level,
@@ -254,7 +234,8 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       },
       channels: ["card", "mobile_money", "bank_transfer"],
     };
-    console.log("[Payment/Init] Paystack payload:", JSON.stringify(paystackPayload));
+
+    console.log(`[Payment/Init] ref: ${ref}, amount: ${submission.amount}, callback: ${callbackUrl}`);
 
     const paystackRes = await paystackRequest("POST", "/transaction/initialize", paystackPayload);
     if (!paystackRes.status) {
@@ -262,24 +243,22 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
-    // Store ONE canonical transaction with both references
-    const paystackRef = paystackRes.data.reference;
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
-      paystack_ref: ref,              // our sm_xxx ref
-      paystack_internal_ref: paystackRef, // their T... ref
+      paystack_ref: ref,
+      paystack_internal_ref: paystackRes.data.reference || ref,
       amount: submission.amount,
       currency: submission.currency,
     });
 
-    console.log(`[Payment/Init] Success — our ref: ${ref}, paystack ref: ${paystackRef}, access_code: ${paystackRes.data.access_code}`);
+    console.log(`[Payment/Init] Success — ref: ${ref}, auth_url: ${paystackRes.data.authorization_url}`);
     res.json({
       success: true,
-      access_code: paystackRes.data.access_code,
-      reference: ref,                // sm_xxx — stored in sessionStorage
-      paystackReference: paystackRef, // T... — returned by popup callback
+      reference: ref,
       authorization_url: paystackRes.data.authorization_url,
+      // access_code still returned for any future popup use
+      access_code: paystackRes.data.access_code,
     });
   } catch (err) {
     console.error("[Payment/Init] Exception:", err);
@@ -287,13 +266,27 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
   }
 });
 
+// ─── PAYMENT VERIFY ───────────────────────────────────────────────
 app.post("/api/payment/verify", async (req, res) => {
   try {
-    const { reference } = req.body;
-    if (!reference) return res.status(400).json({ error: "Reference required." });
-    const transaction = await db.getTransactionByRef(reference);
-    if (!transaction) return res.status(404).json({ error: "Transaction not found." });
-    // If already marked success in DB, return existing review
+    const { reference, submissionId } = req.body;
+    if (!reference && !submissionId) return res.status(400).json({ error: "Reference or submissionId required." });
+
+    console.log(`[Verify] ref: ${reference}, subId: ${submissionId}`);
+
+    // Look up transaction by ref first, fall back to submissionId
+    let transaction = reference ? await db.getTransactionByRef(reference) : null;
+    if (!transaction && submissionId) {
+      console.log(`[Verify] Ref not found — trying submissionId fallback`);
+      transaction = await db.getTransactionBySubmission(submissionId);
+    }
+    if (!transaction) {
+      return res.status(404).json({ error: "Transaction not found. Please contact support with ref: " + reference });
+    }
+
+    const verifyRef = transaction.paystack_ref; // Always use our sm_xxx ref to verify
+
+    // Already successful — return existing review
     if (transaction.status === "success") {
       const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
       const submission = await db.getSubmissionById(transaction.submission_id);
@@ -301,93 +294,75 @@ app.post("/api/payment/verify", async (req, res) => {
         success: true,
         reviewToken: existingReview?.token || null,
         status: existingReview ? "reviewed" : "paid_awaiting_review",
-        submission: submission ? { name: submission.name, email: submission.email, level: submission.level, fileCount: submission.file_count } : null
+        submission: submission ? { name: submission.name, email: submission.email, level: submission.level, fileCount: submission.file_count } : null,
       });
     }
 
-    // ── Verify with Paystack (with Retry Loop) ───────────────────
-    let verification;
-    let paystackStatus;
-    let retries = 5;
-
-    while (retries > 0) {
-      verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
-      paystackStatus = verification.data?.status;
-      console.log(`[Verify/Paystack] ref: ${reference}, status: ${paystackStatus || "unknown"}, try: ${6 - retries}`);
-
-      if (verification.status && paystackStatus === "success") break;
-
-      // If abandoned or pending, wait and retry unless it's the last try
-      if (paystackStatus === "abandoned" || paystackStatus === "pending") {
-        retries--;
-        if (retries > 0) {
-          console.log(`[Verify/Wait] Status is '${paystackStatus}', waiting 2.5s...`);
-          await new Promise(resolve => setTimeout(resolve, 2500));
-          continue;
-        }
-      } else {
-        // Hard failure (e.g. failed, reversed, or API error)
-        break;
-      }
-    }
+    // ── Verify with Paystack ──────────────────────────────────────
+    console.log(`[Verify] Checking Paystack for ref: ${verifyRef}`);
+    const verification = await paystackRequest("GET", `/transaction/verify/${verifyRef}`);
+    const paystackStatus = verification.data?.status;
+    console.log(`[Verify] Paystack status: ${paystackStatus}`);
 
     if (!verification.status || !paystackStatus) {
-      console.error("[Verify/Paystack] Bad response:", JSON.stringify(verification));
       return res.status(502).json({ error: "Could not reach payment provider. Please try again." });
     }
 
-    // ── Handle final non-success statuses ────────────────────────
-    if (paystackStatus === "abandoned" || paystackStatus === "pending") {
-      console.warn(`[Verify] Final status is '${paystackStatus}' — giving up after retries.`);
+    // Not yet confirmed — tell frontend to retry
+    if (paystackStatus === "pending") {
       return res.status(402).json({
-        error: `Payment status is '${paystackStatus}'. If you completed payment, please wait 30 seconds and click Check Status again.`,
+        error: "Payment is still processing. Please wait a moment and try again.",
         status: paystackStatus,
         retryable: true,
       });
     }
 
-    if (paystackStatus !== "success") {
-      await db.updateTransactionFailed(reference);
-      return res.status(402).json({ error: `Payment was not completed (status: ${paystackStatus}). Please try again.` });
+    // Abandoned — this should rarely happen with redirect flow
+    if (paystackStatus === "abandoned") {
+      return res.status(402).json({
+        error: "Payment was not completed. Please try paying again.",
+        status: paystackStatus,
+        retryable: false,
+      });
     }
 
-    // ── Amount check — log but don't hard-fail (test amounts differ) ─
+    if (paystackStatus !== "success") {
+      await db.updateTransactionFailed(verifyRef);
+      return res.status(402).json({ error: `Payment failed (${paystackStatus}). Please try again.` });
+    }
+
+    // ── Amount check ──────────────────────────────────────────────
     if (verification.data.amount !== transaction.amount) {
-      console.warn(`[Amount] Mismatch ref ${reference}: DB has ${transaction.amount}, Paystack says ${verification.data.amount}`);
-      // In production, only fail if difference is significant (not a test amount issue)
+      console.warn(`[Verify] Amount mismatch: expected ${transaction.amount}, got ${verification.data.amount}`);
       const ratio = verification.data.amount / transaction.amount;
       if (process.env.NODE_ENV === "production" && (ratio < 0.95 || ratio > 1.05)) {
-        console.error(`[Amount/FRAUD] Significant mismatch — failing transaction`);
-        await db.updateTransactionFailed(reference);
+        await db.updateTransactionFailed(verifyRef);
         return res.status(402).json({ error: "Payment amount mismatch. Please contact support." });
       }
-      console.warn("[Amount] Minor/test mismatch — continuing");
     }
-    await db.updateTransactionSuccess(reference, verification.data);
+
+    await db.updateTransactionSuccess(verifyRef, verification.data);
+    console.log(`[Verify] Payment confirmed — triggering review for ${transaction.submission_id}`);
     const reviewToken = await triggerReview(transaction);
     const submission = await db.getSubmissionById(transaction.submission_id);
+
     res.json({
       success: true,
       reviewToken,
-      submission: submission ? {
-        name: submission.name,
-        email: submission.email,
-        level: submission.level,
-        fileCount: submission.file_count
-      } : null
+      submission: submission ? { name: submission.name, email: submission.email, level: submission.level, fileCount: submission.file_count } : null,
     });
   } catch (err) {
-    console.error("[Payment/Verify]", err);
+    console.error("[Verify] Exception:", err);
     res.status(500).json({ error: "Verification failed. Please contact support with your reference." });
   }
 });
 
+// ─── WEBHOOK ──────────────────────────────────────────────────────
 app.post("/api/webhook/paystack", async (req, res) => {
   res.sendStatus(200);
   try {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
     const signature = req.headers["x-paystack-signature"];
-    const computed = crypto.createHmac("sha512", secret).update(req.body).digest("hex");
+    const computed = crypto.createHmac("sha512", process.env.PAYSTACK_SECRET_KEY).update(req.body).digest("hex");
     if (computed !== signature) { console.warn("[Webhook] HMAC failed"); return; }
     const event = JSON.parse(req.body.toString());
     if (event.event !== "charge.success") return;
@@ -398,19 +373,24 @@ app.post("/api/webhook/paystack", async (req, res) => {
     if (event.data.amount !== transaction.amount) { console.error(`[Webhook/FRAUD] Amount mismatch ref ${ref}`); return; }
     await db.updateTransactionSuccess(ref, event.data);
     await triggerReview(transaction);
+    console.log(`[Webhook] Review triggered for ref ${ref}`);
   } catch (err) {
     console.error("[Webhook] Error:", err);
   }
 });
 
+// ─── REVIEW ───────────────────────────────────────────────────────
 async function triggerReview(transaction) {
   const submission = await db.getSubmissionById(transaction.submission_id);
   if (!submission) throw new Error("Submission not found for review");
-  const cached = fileTextCache.get(submission.id);
-  const files = cached?.texts || [];
-  const docContext = files.length
-    ? files.map((f, i) => `--- ${i === 0 ? "MAIN DOCUMENT" : "SUPPORTING MATERIAL"}: ${f.name} ---\n${f.text}`).join("\n\n")
-    : "[Document text unavailable — files may have expired from cache. Please contact support.]";
+
+  // ── KEY FIX: Read text from DB — never from in-memory cache ──
+  const docContext = submission.extracted_text?.trim()
+    ? submission.extracted_text
+    : "[Document text unavailable. Please contact support.]";
+
+  console.log(`[Review] Text available: ${docContext.length} chars`);
+
   const levelCriteria = {
     "Level 7": ["Critical Analysis", "Research Methodology", "Theoretical Frameworks", "Academic Writing", "Argument Coherence"],
     "Level 8": ["Original Contribution", "Research Design Rigour", "Literature Synthesis", "Theoretical Innovation", "Scholarly Impact"],
@@ -418,6 +398,7 @@ async function triggerReview(transaction) {
     "Level 10": ["Paradigm Contribution", "Global Scholarly Relevance", "Policy Implications", "Pedagogical Value", "Legacy Impact"],
   };
   const criteria = levelCriteria[submission.level] || levelCriteria["Level 7"];
+
   const prompt = `You are a senior academic examiner assessing ${submission.level} work.
 The candidate has submitted ${submission.file_count} document(s). The first is their main submission. Any additional documents are supporting materials such as marking guidelines or rubrics.
 Read all documents carefully and provide an honest, rigorous, specific review. Reference the actual content directly — do not give generic feedback.
@@ -427,21 +408,21 @@ Return ONLY valid JSON with no markdown, no code fences, no preamble.
   "overallScore": <integer 0-100>,
   "grade": "<Distinction|Merit|Pass|Fail>",
   "executiveSummary": "<2-3 precise sentences directly referencing the work>",
-  "strengths": ["<specific strength referencing actual content>", "<strength 2>", "<strength 3>"],
-  "criticalWeaknesses": ["<specific weakness referencing actual content>", "<weakness 2>", "<weakness 3>"],
+  "strengths": ["<specific strength>", "<strength 2>", "<strength 3>"],
+  "criticalWeaknesses": ["<specific weakness>", "<weakness 2>", "<weakness 3>"],
   "criteriaScores": {
-    ${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence referencing actual content>" }`).join(",\n    ")}
+    ${criteria.map(c => `"${c}": { "score": <0-100>, "feedback": "<one specific sentence>" }`).join(",\n    ")}
   },
   "improvementPlan": [
-    { "priority": "High",   "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
-    { "priority": "High",   "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
-    { "priority": "Medium", "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
-    { "priority": "Medium", "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" },
-    { "priority": "Low",    "area": "<area>", "action": "<concrete actionable step>", "rationale": "<why this matters>" }
+    { "priority": "High",   "area": "<area>", "action": "<concrete step>", "rationale": "<why>" },
+    { "priority": "High",   "area": "<area>", "action": "<concrete step>", "rationale": "<why>" },
+    { "priority": "Medium", "area": "<area>", "action": "<concrete step>", "rationale": "<why>" },
+    { "priority": "Medium", "area": "<area>", "action": "<concrete step>", "rationale": "<why>" },
+    { "priority": "Low",    "area": "<area>", "action": "<concrete step>", "rationale": "<why>" }
   ],
-  "recommendedResources": ["<specific book, journal, or tool>", "<resource 2>", "<resource 3>"],
+  "recommendedResources": ["<book/journal/tool>", "<resource 2>", "<resource 3>"],
   "resubmissionReadiness": "<Ready for Submission|Minor Revisions Required|Major Revisions Required|Not Ready for Submission>",
-  "reviewerNotes": "<One honest paragraph of final commentary directly referencing the work>"
+  "reviewerNotes": "<One honest paragraph of final commentary>"
 }
 
 SUBMITTED DOCUMENTS:
@@ -451,16 +432,8 @@ ${docContext}
 
   const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 2000,
-      messages: [{ role: "user", content: prompt }],
-    }),
+    headers: { "Content-Type": "application/json", "x-api-key": process.env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-3-5-sonnet-20241022", max_tokens: 2000, messages: [{ role: "user", content: prompt }] }),
   });
 
   if (!anthropicRes.ok) {
@@ -475,7 +448,7 @@ ${docContext}
   try {
     result = JSON.parse(raw);
   } catch (parseErr) {
-    console.error("[Review] JSON parse failed. Raw output:", raw.slice(0, 500));
+    console.error("[Review] JSON parse failed:", raw.slice(0, 500));
     throw new Error("AI review returned invalid JSON");
   }
 
@@ -488,8 +461,7 @@ ${docContext}
     token: reviewToken,
   });
 
-  fileTextCache.delete(submission.id);
-  console.log(`[Review] Completed for submission ${submission.id} — score: ${result.overallScore}`);
+  console.log(`[Review] Done for ${submission.id} — score: ${result.overallScore}`);
   return reviewToken;
 }
 
@@ -498,28 +470,19 @@ app.get("/api/review/:token", async (req, res) => {
     const { token } = req.params;
     if (!token || token.length < 96) return res.status(400).json({ error: "Invalid token." });
     const review = await db.getReviewByToken(token);
-    if (!review) return res.status(404).json({ error: "Review not found. The link may have expired." });
-    res.json({
-      success: true,
-      result: JSON.parse(review.result_json),
-      name: review.name,
-      level: review.level,
-      fileNames: JSON.parse(review.file_names),
-      createdAt: review.created_at,
-    });
+    if (!review) return res.status(404).json({ error: "Review not found." });
+    res.json({ success: true, result: JSON.parse(review.result_json), name: review.name, level: review.level, fileNames: JSON.parse(review.file_names), createdAt: review.created_at });
   } catch (err) {
     console.error("[Review/Get]", err);
     res.status(500).json({ error: "Could not retrieve review." });
   }
 });
 
-app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "../frontend/index.html"));
-});
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "../frontend/index.html")));
 
 app.use((err, req, res, next) => {
-  if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "File too large. Maximum 10MB per file." });
-  if (err.code === "LIMIT_FILE_COUNT") return res.status(400).json({ error: "Maximum 10 files per submission." });
+  if (err.code === "LIMIT_FILE_SIZE") return res.status(400).json({ error: "File too large. Maximum 10MB." });
+  if (err.code === "LIMIT_FILE_COUNT") return res.status(400).json({ error: "Maximum 10 files." });
   console.error("[Unhandled]", err);
   res.status(500).json({ error: "An unexpected error occurred." });
 });
