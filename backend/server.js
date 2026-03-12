@@ -202,6 +202,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       file_names: JSON.stringify(req.files.map(f => f.originalname)),
       country_code: geo?.country || null,
       ip_address: ip,
+      extracted_text: "",
     });
     fileTextCache.set(submissionId, {
       texts: req.files.map(f => ({ name: f.originalname, text: extractText(f.buffer) })),
@@ -452,7 +453,7 @@ ${docContext}
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-5",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 2000,
       messages: [{ role: "user", content: prompt }],
     }),
