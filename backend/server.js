@@ -9,7 +9,6 @@ const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
 const crypto = require("crypto");
-const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const fetch = require("node-fetch");
 const geoip = require("geoip-lite");
