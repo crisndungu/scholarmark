@@ -2,7 +2,23 @@
  * server.js — ScholarMark Backend
  */
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "../.env") });
+const fs = require("fs");
+const envPath = path.join(__dirname, "../.env");
+const localEnvPath = path.join(__dirname, ".env");
+
+if (fs.existsSync(envPath)) {
+  console.log(`[Config] Loading .env from ${envPath}`);
+  require("dotenv").config({ path: envPath });
+} else if (fs.existsSync(localEnvPath)) {
+  console.log(`[Config] Loading .env from ${localEnvPath}`);
+  require("dotenv").config({ path: localEnvPath });
+} else {
+  console.warn("[Config] No .env file found in root or backend folder. Falling back to system environment variables.");
+  require("dotenv").config();
+}
+
+console.log("[Config] VITE_CLERK_PUBLISHABLE_KEY present:", !!process.env.VITE_CLERK_PUBLISHABLE_KEY);
+console.log("[Config] CLERK_SECRET_KEY present:", !!process.env.CLERK_SECRET_KEY);
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -98,8 +114,10 @@ const upload = multer({
 });
 
 app.get("/api/config", (req, res) => {
+  const clerkKey = process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY || "";
+  console.log("[Config] Serving Clerk Key:", clerkKey ? "YES (masked)" : "MISSING");
   res.json({
-    clerkPublishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY || "",
+    clerkPublishableKey: clerkKey,
     paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || ""
   });
 });
