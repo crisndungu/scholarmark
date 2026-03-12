@@ -116,8 +116,8 @@ const db_helpers = {
 
   async createTransaction(data) {
     await db.execute({
-      sql: `INSERT INTO transactions (id, submission_id, paystack_ref, amount, currency)
-            VALUES (:id, :submission_id, :paystack_ref, :amount, :currency)`,
+      sql: `INSERT INTO transactions (id, submission_id, paystack_ref, paystack_internal_ref, amount, currency)
+            VALUES (:id, :submission_id, :paystack_ref, :paystack_internal_ref, :amount, :currency)`,
       args: data,
     });
   },

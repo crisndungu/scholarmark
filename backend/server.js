@@ -262,32 +262,16 @@ app.post("/api/payment/init", paymentLimiter, async (req, res) => {
       return res.status(502).json({ error: `Payment initialization failed: ${paystackRes.message || "Unknown error"}` });
     }
 
-    // Store our sm_xxx ref as the canonical transaction
+    // Store ONE canonical transaction with both references
+    const paystackRef = paystackRes.data.reference;
     await db.createTransaction({
       id: uuidv4(),
       submission_id: submissionId,
-      paystack_ref: ref,
+      paystack_ref: ref,              // our sm_xxx ref
+      paystack_internal_ref: paystackRef, // their T... ref
       amount: submission.amount,
       currency: submission.currency,
     });
-
-    // Paystack's popup callback returns THEIR ref (T927...), not ours.
-    // Store their ref as an alias so verify() finds it regardless.
-    const paystackRef = paystackRes.data.reference;
-    if (paystackRef && paystackRef !== ref) {
-      console.log(`[Payment/Init] Storing Paystack alias ref: ${paystackRef}`);
-      try {
-        await db.createTransaction({
-          id: uuidv4(),
-          submission_id: submissionId,
-          paystack_ref: paystackRef,
-          amount: submission.amount,
-          currency: submission.currency,
-        });
-      } catch (aliasErr) {
-        console.warn("[Payment/Init] Alias ref already exists (OK):", aliasErr.message);
-      }
-    }
 
     console.log(`[Payment/Init] Success — our ref: ${ref}, paystack ref: ${paystackRef}, access_code: ${paystackRes.data.access_code}`);
     res.json({
@@ -321,31 +305,48 @@ app.post("/api/payment/verify", async (req, res) => {
       });
     }
 
-    // ── Verify with Paystack ──────────────────────────────────────
-    const verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
-    const paystackStatus = verification.data?.status;
-    console.log(`[Verify/Paystack] ref: ${reference}, status: ${paystackStatus}, amount: ${verification.data?.amount}`);
+    // ── Verify with Paystack (with Retry Loop) ───────────────────
+    let verification;
+    let paystackStatus;
+    let retries = 5;
+
+    while (retries > 0) {
+      verification = await paystackRequest("GET", `/transaction/verify/${reference}`);
+      paystackStatus = verification.data?.status;
+      console.log(`[Verify/Paystack] ref: ${reference}, status: ${paystackStatus || "unknown"}, try: ${6 - retries}`);
+
+      if (verification.status && paystackStatus === "success") break;
+
+      // If abandoned or pending, wait and retry unless it's the last try
+      if (paystackStatus === "abandoned" || paystackStatus === "pending") {
+        retries--;
+        if (retries > 0) {
+          console.log(`[Verify/Wait] Status is '${paystackStatus}', waiting 2.5s...`);
+          await new Promise(resolve => setTimeout(resolve, 2500));
+          continue;
+        }
+      } else {
+        // Hard failure (e.g. failed, reversed, or API error)
+        break;
+      }
+    }
 
     if (!verification.status || !paystackStatus) {
       console.error("[Verify/Paystack] Bad response:", JSON.stringify(verification));
       return res.status(502).json({ error: "Could not reach payment provider. Please try again." });
     }
 
-    // ── Handle non-success statuses ───────────────────────────────
-    // "abandoned" = popup closed before Paystack registered — payment may still succeed via webhook.
-    // "pending"   = processing, not yet confirmed.
-    // DO NOT permanently mark failed for these — allow webhook to complete it.
+    // ── Handle final non-success statuses ────────────────────────
     if (paystackStatus === "abandoned" || paystackStatus === "pending") {
-      console.warn(`[Verify] Status is '${paystackStatus}' — not permanently failing. Webhook may complete this.`);
+      console.warn(`[Verify] Final status is '${paystackStatus}' — giving up after retries.`);
       return res.status(402).json({
-        error: `Payment status is '${paystackStatus}'. If you completed payment, please wait a moment and refresh, or contact support with reference: ${reference}`,
+        error: `Payment status is '${paystackStatus}'. If you completed payment, please wait 30 seconds and click Check Status again.`,
         status: paystackStatus,
         retryable: true,
       });
     }
 
     if (paystackStatus !== "success") {
-      // Only permanently fail on explicit failure statuses
       await db.updateTransactionFailed(reference);
       return res.status(402).json({ error: `Payment was not completed (status: ${paystackStatus}). Please try again.` });
     }
