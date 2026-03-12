@@ -179,19 +179,9 @@ app.post("/api/location", async (req, res) => {
 });
 
 // ─── SUBMISSION ───────────────────────────────────────────────────
-app.post("/api/submission", submissionLimiter, upload.array("files", 10), async (req, res) => {
+app.post("/api/submission", requireAuth, submissionLimiter, upload.array("files", 10), async (req, res) => {
   try {
-    let userId = null;
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith("Bearer ")) {
-      try {
-        const token = authHeader.split(" ")[1];
-        const session = await clerk.verifyToken(token);
-        userId = session.sub;
-      } catch (e) {
-        console.warn("[Submission] Auth token invalid, proceeding as guest");
-      }
-    }
+    const userId = req.auth.userId;
 
     const { name, email, level } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Name is required." });

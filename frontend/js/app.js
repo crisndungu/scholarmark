@@ -158,6 +158,9 @@ async function initClerk() {
           if (signInDiv) window.Clerk.mountSignInButton(signInDiv, { mode: 'modal', afterSignInUrl: '/portal.html' });
           if (portalLink) portalLink.style.display = 'none';
         }
+        
+        // Always re-render widget to apply/remove auth wall
+        renderWidget();
       } catch (e) {
         console.error("[Clerk] Init failed:", e);
       }
@@ -207,6 +210,31 @@ function inferRole(file, index) {
 function renderWidget() {
   const titles = { upload: "Begin Your Submission", payment: "Confirm & Pay", processing: "Reviewing Your Work…", results: "Your Review Report" };
   const el = document.getElementById("widgetTitle"); if (el) el.textContent = titles[S.step];
+
+  // Global Auth Guard: Must be signed in to submit
+  if (S.step === "upload" && (!window.Clerk || !window.Clerk.user)) {
+    const body = document.getElementById("widgetBody");
+    if (el) el.textContent = "Sign In Required";
+    if (body) {
+      body.innerHTML = `
+        <div style="text-align:center;padding:40px 20px">
+          <div style="font-size:3rem;margin-bottom:20px">🔐</div>
+          <h3 style="font-family:'EB Garamond',serif;font-size:1.4rem;margin-bottom:12px">Please sign in to continue</h3>
+          <p style="color:#64748b;margin-bottom:24px;font-size:0.95rem">To submit documents for review, you must first create an account or sign in with Google.</p>
+          <div id="widget-auth"></div>
+        </div>
+      `;
+      setTimeout(() => {
+        if (window.Clerk) window.Clerk.mountSignIn(document.getElementById('widget-auth'), { 
+          afterSignInUrl: window.location.href, 
+          afterSignUpUrl: window.location.href 
+        });
+      }, 10);
+    }
+    syncDots();
+    return;
+  }
+
   syncDots();
   const body = document.getElementById("widgetBody"); if (!body) return;
   const renders = { upload: renderUpload, payment: renderPayment, processing: renderProcessing, results: renderResults };
