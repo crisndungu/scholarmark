@@ -92,6 +92,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   const urlParams = new URLSearchParams(window.location.search);
   const urlRef = urlParams.get("reference") || urlParams.get("trxref");
   const urlSubId = urlParams.get("submissionId");
+  const urlToken = urlParams.get("token");
+
+  if (urlToken) {
+    console.log("[Portal] Loading direct review from token");
+    window.history.replaceState({}, document.title, window.location.pathname);
+    loadReview(urlToken);
+    return;
+  }
+
   const stored = sessionStorage.getItem("scholarmark_payment") || localStorage.getItem("scholarmark_payment_backup");
 
   if ((urlRef || urlSubId) && stored) {
@@ -123,10 +132,38 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  renderWidget();
   loadLocationAndPricing().then(() => { updatePricingUI(); if (S.step === "upload") renderWidget(); });
   loadPaystackKey();
+  initClerk();
 });
+
+async function initClerk() {
+  const checkClerk = setInterval(async () => {
+    if (window.Clerk) {
+      clearInterval(checkClerk);
+      try {
+        await window.Clerk.load();
+        const signInDiv = document.getElementById('sign-in-button');
+        const userBtnDiv = document.getElementById('user-button');
+        const portalLink = document.getElementById('portal-link');
+
+        if (window.Clerk.user) {
+          if (signInDiv) signInDiv.style.display = 'none';
+          if (portalLink) portalLink.style.display = 'inline-block';
+          if (userBtnDiv) window.Clerk.mountUserButton(userBtnDiv);
+          
+          // Pre-fill email if not already set
+          if (!S.email) S.email = window.Clerk.user.primaryEmailAddress?.emailAddress || "";
+        } else {
+          if (signInDiv) window.Clerk.mountSignInButton(signInDiv, { mode: 'modal', afterSignInUrl: '/portal.html' });
+          if (portalLink) portalLink.style.display = 'none';
+        }
+      } catch (e) {
+        console.error("[Clerk] Init failed:", e);
+      }
+    }
+  }, 100);
+}
 
 async function loadPaystackKey() {
   try {
@@ -281,7 +318,19 @@ async function toPayment() {
     form.append("level", S.level);
     form.append("currency", S.currency);
     S.files.forEach(f => form.append("files", f));
-    const res = await fetch(`${API_BASE}/api/submission`, { method: "POST", body: form, credentials: "include" });
+
+    const headers = {};
+    if (window.Clerk?.session) {
+      const token = await window.Clerk.session.getToken();
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const res = await fetch(`${API_BASE}/api/submission`, { 
+      method: "POST", 
+      body: form, 
+      headers: headers,
+      credentials: "include" 
+    });
     const data = await res.json();
     if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
     S.submissionId = data.submissionId;
@@ -425,7 +474,14 @@ async function verifyPayment(reference) {
       
       // Still processing or generating review
       if (data.retryable || data.status === "paid_awaiting_review") {
-        console.log("[Verify] Still working... retrying in 5s");
+        S._retryCount = (S._retryCount || 0) + 1;
+        if (S._retryCount > 12) { // 12 retries * 5s = 60 seconds
+          S.step = "payment"; renderWidget();
+          showErr(data.error || "Review generation is taking longer than expected. Please contact support.");
+          S._retryCount = 0;
+          return;
+        }
+        console.log(`[Verify] Still working (attempt ${S._retryCount})... retrying in 5s`);
         return setTimeout(() => verifyPayment(reference), 5000);
       }
       
@@ -434,6 +490,8 @@ async function verifyPayment(reference) {
       showErr(data.error || "Payment not completed. Please try again.");
       return;
     }
+
+    S._retryCount = 0; // Reset on success
 
     if (!data.reviewToken && data.status === "paid_awaiting_review") {
       console.log("[Verify] Paid but reviewing... retrying in 5s");

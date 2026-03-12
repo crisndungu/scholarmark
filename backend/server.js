@@ -12,8 +12,11 @@ const path = require("path");
 const { v4: uuidv4 } = require("uuid");
 const fetch = require("node-fetch");
 const geoip = require("geoip-lite");
+const { createClerkClient } = require("@clerk/clerk-sdk-node");
 const db = require("./database");
 const pricing = require("./pricing");
+
+const clerk = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
 // ─── CONFIG VALIDATION ────────────────────────────────────────────
 const FATAL_ENV = ["ANTHROPIC_API_KEY", "SESSION_SECRET"];
@@ -129,7 +132,32 @@ function extractText(buffer) {
   }
 }
 
+// ─── AUTH MIDDLEWARE ──────────────────────────────────────────────
+async function requireAuth(req, res, next) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith("Bearer ")) return res.status(401).json({ error: "Unauthenticated" });
+    const token = authHeader.split(" ")[1];
+    const session = await clerk.verifyToken(token);
+    req.auth = { userId: session.sub };
+    next();
+  } catch (err) {
+    console.error("[Auth] Session verification failed:", err.message);
+    res.status(401).json({ error: "Invalid session" });
+  }
+}
+
 // ─── ROUTES ───────────────────────────────────────────────────────
+app.get("/api/user/submissions", requireAuth, async (req, res) => {
+  try {
+    const submissions = await db.getSubmissionsByUserId(req.auth.userId);
+    res.json({ success: true, submissions });
+  } catch (err) {
+    console.error("[User/Submissions] ERROR:", err);
+    res.status(500).json({ error: "Could not fetch history." });
+  }
+});
+
 app.get("/api/pubkey", (req, res) => {
   res.json({ key: process.env.PAYSTACK_PUBLIC_KEY });
 });
@@ -153,6 +181,18 @@ app.post("/api/location", async (req, res) => {
 // ─── SUBMISSION ───────────────────────────────────────────────────
 app.post("/api/submission", submissionLimiter, upload.array("files", 10), async (req, res) => {
   try {
+    let userId = null;
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith("Bearer ")) {
+      try {
+        const token = authHeader.split(" ")[1];
+        const session = await clerk.verifyToken(token);
+        userId = session.sub;
+      } catch (e) {
+        console.warn("[Submission] Auth token invalid, proceeding as guest");
+      }
+    }
+
     const { name, email, level } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: "Name is required." });
     if (!email?.includes("@")) return res.status(400).json({ error: "Valid email is required." });
@@ -187,6 +227,7 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
       country_code: geo?.country || null,
       ip_address: ip,
       extracted_text: extractedText,
+      user_id: userId,
     });
 
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted} — text: ${extractedText.length} chars`);
@@ -297,12 +338,16 @@ app.post("/api/payment/verify", async (req, res) => {
           existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
         } catch (revErr) {
           console.error("[Verify] Re-triggering review failed:", revErr.message);
-          return res.status(402).json({
-            success: true,
+          
+          // Check for common fatal errors (e.g. invalid JSON, API quota)
+          const isFatal = revErr.message.includes("invalid JSON") || revErr.message.includes("401") || revErr.message.includes("403");
+          
+          return res.status(isFatal ? 500 : 402).json({
+            success: !isFatal,
             reviewToken: null,
             status: "paid_awaiting_review",
-            error: "Review is being generated. Please wait a moment.",
-            retryable: true,
+            error: isFatal ? `Academic review generation failed: ${revErr.message}` : "Review is being generated. Please wait a moment.",
+            retryable: !isFatal,
           });
         }
       }
@@ -462,12 +507,14 @@ ${docContext}
   const anthropicData = await anthropicRes.json();
   const raw = anthropicData.content.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
 
+  console.log(`[Review] Anthropic raw response received (${raw.length} chars)`);
+
   let result;
   try {
     result = JSON.parse(raw);
   } catch (parseErr) {
-    console.error("[Review] JSON parse failed:", raw.slice(0, 500));
-    throw new Error("AI review returned invalid JSON");
+    console.error("[Review] JSON parse failed. Raw text:", raw);
+    throw new Error("AI review returned invalid JSON content. This usually happens if the AI output contains unescaped characters.");
   }
 
   const reviewToken = crypto.randomBytes(48).toString("hex");
@@ -479,7 +526,7 @@ ${docContext}
     token: reviewToken,
   });
 
-  console.log(`[Review] Done for ${submission.id} — score: ${result.overallScore}`);
+  console.log(`[Review] Successfully saved review for subId: ${submission.id} — score: ${result.overallScore}`);
   return reviewToken;
 }
 
@@ -493,6 +540,22 @@ app.get("/api/review/:token", async (req, res) => {
   } catch (err) {
     console.error("[Review/Get]", err);
     res.status(500).json({ error: "Could not retrieve review." });
+  }
+});
+
+app.get("/api/review/by-submission/:submissionId", requireAuth, async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const submission = await db.getSubmissionById(submissionId);
+    if (!submission || submission.user_id !== req.auth.userId) {
+      return res.status(403).json({ error: "Unauthorized" });
+    }
+    const review = await db.getReviewBySubmissionId(submissionId);
+    if (!review) return res.status(404).json({ error: "Review not found" });
+    res.json({ success: true, token: review.token });
+  } catch (err) {
+    console.error("[Review/BySub]", err);
+    res.status(500).json({ error: "Internal error" });
   }
 });
 

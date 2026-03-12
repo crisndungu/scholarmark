@@ -33,7 +33,8 @@ async function initSchema() {
       country_code  TEXT,
       ip_address    TEXT,
       status        TEXT DEFAULT 'pending',
-      extracted_text TEXT
+      extracted_text TEXT,
+      user_id       TEXT
     );
 
     CREATE TABLE IF NOT EXISTS transactions (
@@ -78,6 +79,11 @@ async function initSchema() {
       console.log("[DB] Migrating: Adding paystack_internal_ref column to transactions table");
       await db.execute("ALTER TABLE transactions ADD COLUMN paystack_internal_ref TEXT");
     }
+    const hasUserID = tableInfo.rows.some(r => r.name === 'user_id');
+    if (!hasUserID) {
+      console.log("[DB] Migrating: Adding user_id column to submissions table");
+      await db.execute("ALTER TABLE submissions ADD COLUMN user_id TEXT");
+    }
   } catch (migErr) {
     console.warn("[DB] Migration check failed (non-critical if fresh install):", migErr.message);
   }
@@ -107,9 +113,9 @@ const db_helpers = {
   async createSubmission(data) {
     await db.execute({
       sql: `INSERT INTO submissions
-              (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address, extracted_text)
+              (id, name, email, level, currency, amount, file_count, file_names, country_code, ip_address, extracted_text, user_id)
             VALUES
-              (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address, :extracted_text)`,
+              (:id, :name, :email, :level, :currency, :amount, :file_count, :file_names, :country_code, :ip_address, :extracted_text, :user_id)`,
       args: data,
     });
   },
@@ -217,6 +223,14 @@ const db_helpers = {
       args: [submissionId],
     });
     return toObj(result.rows[0]) || null;
+  },
+
+  async getSubmissionsByUserId(userId) {
+    const result = await db.execute({
+      sql: "SELECT * FROM submissions WHERE user_id = ? ORDER BY created_at DESC",
+      args: [userId],
+    });
+    return result.rows.map(toObj);
   },
 };
 

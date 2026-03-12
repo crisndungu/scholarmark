@@ -9,6 +9,7 @@
         "build": ""
     },
     "dependencies": {
+        "@clerk/clerk-sdk-node": "^4.13.23",
         "@libsql/client": "^0.17.0",
         "cors": "^2.8.5",
         "dotenv": "^16.3.1",
