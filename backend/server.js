@@ -97,6 +97,13 @@ const upload = multer({
   },
 });
 
+app.get("/api/config", (req, res) => {
+  res.json({
+    clerkPublishableKey: process.env.VITE_CLERK_PUBLISHABLE_KEY || process.env.CLERK_PUBLISHABLE_KEY || "",
+    paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || ""
+  });
+});
+
 app.use(express.static(path.join(__dirname, "../frontend"), {
   etag: true,
   maxAge: process.env.NODE_ENV === "production" ? "1d" : 0,

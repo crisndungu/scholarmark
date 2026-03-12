@@ -138,38 +138,62 @@ document.addEventListener("DOMContentLoaded", async () => {
 });
 
 async function initClerk() {
-  const checkClerk = setInterval(async () => {
-    if (window.Clerk) {
-      clearInterval(checkClerk);
-      try {
-        await window.Clerk.load();
-        const signInDiv = document.getElementById('sign-in-button');
-        const userBtnDiv = document.getElementById('user-button');
-        const portalLink = document.getElementById('portal-link');
-        const heroAuthCta = document.getElementById('hero-auth-cta');
-
-        if (window.Clerk.user) {
-          if (signInDiv) signInDiv.innerHTML = ''; 
-          if (portalLink) portalLink.style.display = 'inline-block';
-          if (userBtnDiv) window.Clerk.mountUserButton(userBtnDiv);
-          if (heroAuthCta) heroAuthCta.style.display = 'none';
-          
-          if (!S.email) S.email = window.Clerk.user.primaryEmailAddress?.emailAddress || "";
-        } else {
-          if (signInDiv) {
-            signInDiv.innerHTML = '<button class="nav-btn-alt" onclick="handleSignIn()">Sign In</button>';
-          }
-          if (portalLink) portalLink.style.display = 'none';
-          if (heroAuthCta) heroAuthCta.style.display = 'block';
-        }
-        
-        window.S.authReady = true;
-        renderWidget();
-      } catch (e) {
-        console.error("[Clerk] Init failed:", e);
-      }
+  try {
+    // 1. Fetch config from backend
+    const configRes = await fetch(`${API_BASE}/api/config`);
+    const config = await configRes.json();
+    const key = config.clerkPublishableKey;
+    
+    if (!key) {
+      console.error("[Clerk] No publishable key found in config");
+      showGlobalErr("Auth configuration missing. Please check .env");
+      return;
     }
-  }, 100);
+
+    // 2. Load Clerk script dynamically
+    const script = document.createElement('script');
+    script.setAttribute('data-clerk-publishable-key', key);
+    script.async = true;
+    script.src = `https://js.clerk.com/v1/clerk.js`;
+    
+    script.onload = async () => {
+      const checkClerk = setInterval(async () => {
+        if (window.Clerk) {
+          clearInterval(checkClerk);
+          try {
+            await window.Clerk.load();
+            const signInDiv = document.getElementById('sign-in-button');
+            const userBtnDiv = document.getElementById('user-button');
+            const portalLink = document.getElementById('portal-link');
+            const heroAuthCta = document.getElementById('hero-auth-cta');
+
+            if (window.Clerk.user) {
+              if (signInDiv) signInDiv.innerHTML = ''; 
+              if (portalLink) portalLink.style.display = 'inline-block';
+              if (userBtnDiv) window.Clerk.mountUserButton(userBtnDiv);
+              if (heroAuthCta) heroAuthCta.style.display = 'none';
+              
+              if (!S.email) S.email = window.Clerk.user.primaryEmailAddress?.emailAddress || "";
+            } else {
+              if (signInDiv) {
+                signInDiv.innerHTML = '<button class="nav-btn-alt" onclick="handleSignIn()">Sign In</button>';
+              }
+              if (portalLink) portalLink.style.display = 'none';
+              if (heroAuthCta) heroAuthCta.style.display = 'block';
+            }
+            
+            window.S.authReady = true;
+            renderWidget();
+          } catch (e) {
+            console.error("[Clerk] Init failed:", e);
+          }
+        }
+      }, 100);
+    };
+    document.head.appendChild(script);
+  } catch (e) {
+    console.error("[Clerk] Config load failed:", e);
+  }
 }
 
 function handleSignIn() {

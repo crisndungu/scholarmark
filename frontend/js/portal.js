@@ -3,32 +3,44 @@
  */
 
 window.addEventListener('load', async function () {
-    // Wait for Clerk to load
-    const checkClerk = setInterval(async () => {
-        if (window.Clerk) {
-            clearInterval(checkClerk);
-            await initPortal();
-        }
-    }, 100);
+    await initClerk();
 });
 
-async function initPortal() {
+async function initClerk() {
     try {
-        await window.Clerk.load();
+        const configRes = await fetch(`${window.API_BASE}/api/config`);
+        const config = await configRes.json();
+        const key = config.clerkPublishableKey;
+        
+        if (!key) return console.error("[Clerk] Missing key");
 
-        if (!window.Clerk.user) {
-            // Not logged in, redirect to sign-in or home
-            window.location.href = '/';
-            return;
-        }
+        const script = document.createElement('script');
+        script.setAttribute('data-clerk-publishable-key', key);
+        script.async = true;
+        script.src = `https://js.clerk.com/v1/clerk.js`;
 
-        // Render User Button
-        const userButtonDiv = document.getElementById('user-button');
-        window.Clerk.mountUserButton(userButtonDiv);
-
-        await loadUserSubmissions();
-    } catch (err) {
-        console.error("[Portal] Init failed:", err);
+        script.onload = async () => {
+            const checkClerk = setInterval(async () => {
+                if (window.Clerk) {
+                    clearInterval(checkClerk);
+                    try {
+                        await window.Clerk.load();
+                        const userBtnDiv = document.getElementById('user-button');
+                        if (window.Clerk.user) {
+                            if (userBtnDiv) window.Clerk.mountUserButton(userBtnDiv);
+                            await loadUserSubmissions();
+                        } else {
+                            window.location.href = '/';
+                        }
+                    } catch (e) {
+                        console.error("[Clerk] Init failed:", e);
+                    }
+                }
+            }, 100);
+        };
+        document.head.appendChild(script);
+    } catch (e) {
+        console.error("[Clerk] Config load failed:", e);
     }
 }
 
