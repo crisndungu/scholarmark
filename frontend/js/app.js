@@ -10,6 +10,7 @@ const S = {
   step: "upload", files: [], level: "Level 7", name: "", email: "",
   currency: "KES", prices: {}, country: "KE", submissionId: null,
   paystackKey: null, reviewToken: null, review: null, progress: 0,
+  pendingRef: null,
 };
 
 const MAX_FILES = 10;
@@ -418,16 +419,8 @@ async function verifyPayment(reference) {
       console.error("[Verify] Failed:", data);
       // Retryable: abandoned / pending (M-Pesa, slow networks)
       if (data.retryable || data.status === "abandoned" || data.status === "pending") {
-        S.step = "processing"; renderWidget();
-        const body = document.getElementById("widgetBody");
-        if (body) body.innerHTML = `<div style="text-align:center;padding:32px 16px">
-<div style="font-size:2rem;margin-bottom:16px">⏳</div>
-<h3 style="font-family:var(--serif);color:var(--oxford);margin-bottom:12px">Payment Pending</h3>
-<p style="color:#555;margin-bottom:8px;line-height:1.6">${data.error || "Your payment is being processed."}</p>
-<p style="font-size:0.8rem;color:#888;margin-bottom:24px">Ref: <code style="background:#f0f4f8;padding:2px 6px;border-radius:3px">${reference}</code></p>
-<button class="btn-w" type="button" onclick="verifyPayment('${reference}')" style="margin-bottom:12px">🔄 Check Payment Status</button>
-<p style="font-size:0.75rem;color:#aaa">If you paid via M-Pesa, allow 1–2 minutes then click Check.</p>
-</div>`;
+        S.pendingRef = reference; // Store for retryVerify()
+        showPendingScreen(reference, data.error);
         return;
       }
       S.step = "payment"; renderWidget();
@@ -536,7 +529,44 @@ function setupReveal() { const ro = new IntersectionObserver((entries) => { entr
 function esc(s) { if (typeof s !== "string") return String(s ?? ""); return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 function showErr(msg) { const el = document.getElementById("errBox"); if (!el) return; el.textContent = msg; el.classList.add("show"); setTimeout(() => el.classList.remove("show"), 7000); }
 
+
+// ─── PENDING PAYMENT SCREEN ───────────────────────────────────────
+function showPendingScreen(reference, message) {
+  S.step = "processing";
+  S.pendingRef = reference;
+  // Update widget title
+  const titleEl = document.getElementById("widgetTitle");
+  if (titleEl) titleEl.textContent = "Payment Pending";
+  syncDots();
+  const body = document.getElementById("widgetBody");
+  if (!body) return;
+  body.innerHTML = `
+<div style="text-align:center;padding:32px 16px">
+  <div style="font-size:2.5rem;margin-bottom:16px">⏳</div>
+  <h3 style="font-family:var(--serif,serif);color:#002147;margin-bottom:12px;font-size:1.25rem">Payment Pending</h3>
+  <p style="color:#555;margin-bottom:8px;line-height:1.6;font-size:0.9rem">${message || "Your payment is being processed."}</p>
+  <p style="font-size:0.8rem;color:#888;margin-bottom:24px">Ref: <code style="background:#f0f4f8;padding:2px 6px;border-radius:3px;font-size:0.75rem">${reference}</code></p>
+  <button class="btn-w" id="retryBtn" type="button" style="margin-bottom:12px">🔄 Check Payment Status</button>
+  <p style="font-size:0.75rem;color:#aaa">If you paid via M-Pesa, allow 1–2 minutes then click Check.</p>
+</div>`;
+  // Attach event listener — avoids inline onclick issues entirely
+  const retryBtn = document.getElementById("retryBtn");
+  if (retryBtn) {
+    retryBtn.addEventListener("click", function () {
+      retryBtn.disabled = true;
+      retryBtn.textContent = "Checking…";
+      verifyPayment(S.pendingRef || reference);
+    });
+  }
+}
+
+function retryVerify() {
+  if (S.pendingRef) verifyPayment(S.pendingRef);
+}
+
 // ─── GLOBAL EXPORTS ───────────────────────────────────────────────
 window.verifyPayment = verifyPayment;
+window.retryVerify = retryVerify;
+window.showPendingScreen = showPendingScreen;
 window.pickLevel = pickLevel; window.removeFile = removeFile; window.toPayment = toPayment; window.doPayment = doPayment; window.downloadReport = downloadReport; window.resetApp = resetApp; window.liveValidateName = liveValidateName; window.liveValidateEmail = liveValidateEmail;
 window.setLevel = function (lv) { S.level = lv; document.getElementById("submit")?.scrollIntoView({ behavior: "smooth" }); };
