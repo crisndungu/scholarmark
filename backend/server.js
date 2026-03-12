@@ -126,12 +126,26 @@ function getClientIP(req) {
 }
 
 async function paystackRequest(method, endpoint, body) {
-  const res = await fetch(`https://api.paystack.co${endpoint}`, {
-    method,
-    headers: { "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return res.json();
+  const url = `https://api.paystack.co${endpoint}`;
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Authorization": `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      console.warn(`[Paystack/API] Error ${res.status} on ${endpoint}:`, JSON.stringify(data));
+    }
+    return data;
+  } catch (err) {
+    console.error(`[Paystack/Fetch] Fatal error on ${endpoint}:`, err.message);
+    return { status: false, message: "Network error" };
+  }
 }
 
 function extractText(buffer) {
@@ -316,13 +330,29 @@ app.post("/api/payment/verify", async (req, res) => {
         } : null
       });
     }
-    const verification = await paystackRequest("GET", `/transaction/verify/${finalRef}`);
-    console.log(`[Verify/Paystack] Response for ${finalRef}:`, JSON.stringify(verification));
+    let verification;
+    let retries = 3;
+    while (retries > 0) {
+      verification = await paystackRequest("GET", `/transaction/verify/${finalRef}`);
+      console.log(`[Verify/Paystack] Reference: ${finalRef}, status: ${verification.data?.status || "unknown"}, try: ${4 - retries}`);
+
+      if (verification.status && verification.data?.status === "success") break;
+
+      retries--;
+      if (retries > 0) {
+        console.log(`[Verify/Wait] Waiting 2s for Paystack to finalize... (${retries} retries left)`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
 
     if (!verification.status || verification.data?.status !== "success") {
-      console.error(`[Verify/Failure] Paystack status: ${verification.data?.status}, Message: ${verification.message}`);
+      console.error(`[Verify/Failure] Final status: ${verification.data?.status}, Message: ${verification.message}`);
       await db.updateTransactionFailed(finalRef);
-      return res.status(402).json({ error: "Payment was not successful." });
+      return res.status(402).json({
+        error: "Payment was not successful.",
+        paystackStatus: verification.data?.status,
+        paystackMessage: verification.message
+      });
     }
     if (verification.data.amount !== transaction.amount) {
       console.warn(`[Amount] Mismatch ref ${finalRef}: expected ${transaction.amount}, got ${verification.data.amount}`);

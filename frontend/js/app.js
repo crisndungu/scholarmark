@@ -576,7 +576,10 @@ async function verifyPayment(reference) {
       console.error("[Verify] Failed:", data);
       S.step = "payment";
       renderWidget();
-      showErr(data.error || "Payment verification failed. Ref: " + reference);
+      let errMsg = data.error || "Payment verification failed.";
+      if (data.paystackStatus) errMsg += ` (Status: ${data.paystackStatus})`;
+      if (data.paystackMessage) errMsg += ` - ${data.paystackMessage}`;
+      showErr(errMsg + " Ref: " + reference);
       return;
     }
 
