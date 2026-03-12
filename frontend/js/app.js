@@ -422,15 +422,22 @@ async function verifyPayment(reference) {
 
     if (!res.ok || !data.success) {
       console.error("[Verify] Failed:", data);
-      // Pending — genuinely still processing (e.g. slow M-Pesa confirm)
-      if (data.retryable) {
-        showPendingScreen(reference, data.error);
-        return;
+      
+      // Still processing or generating review
+      if (data.retryable || data.status === "paid_awaiting_review") {
+        console.log("[Verify] Still working... retrying in 5s");
+        return setTimeout(() => verifyPayment(reference), 5000);
       }
-      // Abandoned — payment was NOT completed, go back so user can try again
+      
+      // Abandoned — payment was NOT completed
       S.step = "payment"; renderWidget();
       showErr(data.error || "Payment not completed. Please try again.");
       return;
+    }
+
+    if (!data.reviewToken && data.status === "paid_awaiting_review") {
+      console.log("[Verify] Paid but reviewing... retrying in 5s");
+      return setTimeout(() => verifyPayment(reference), 5000);
     }
 
     // Restore state from server response (needed after redirect wipes memory)
@@ -442,6 +449,8 @@ async function verifyPayment(reference) {
         S.files = Array.from({ length: data.submission.fileCount || 0 }, (_, i) => ({ name: `File ${i + 1}` }));
       }
     }
+
+    if (!data.reviewToken) throw new Error("Verification succeeded but no review token received");
 
     await loadReview(data.reviewToken);
   } catch (e) {

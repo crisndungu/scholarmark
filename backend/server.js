@@ -288,7 +288,25 @@ app.post("/api/payment/verify", async (req, res) => {
 
     // Already successful — return existing review
     if (transaction.status === "success") {
-      const existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
+      let existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
+
+      if (!existingReview) {
+        console.log(`[Verify] Paid but no review found for subId: ${transaction.submission_id}. Re-triggering...`);
+        try {
+          await triggerReview(transaction);
+          existingReview = await db.getReviewBySubmissionId(transaction.submission_id);
+        } catch (revErr) {
+          console.error("[Verify] Re-triggering review failed:", revErr.message);
+          return res.status(402).json({
+            success: true,
+            reviewToken: null,
+            status: "paid_awaiting_review",
+            error: "Review is being generated. Please wait a moment.",
+            retryable: true,
+          });
+        }
+      }
+
       const submission = await db.getSubmissionById(transaction.submission_id);
       return res.json({
         success: true,
