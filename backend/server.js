@@ -1,7 +1,8 @@
 /**
  * server.js — ScholarMark Backend
  */
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
