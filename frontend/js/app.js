@@ -157,8 +157,7 @@ async function initClerk() {
           if (!S.email) S.email = window.Clerk.user.primaryEmailAddress?.emailAddress || "";
         } else {
           if (signInDiv) {
-            signInDiv.innerHTML = '<button class="nav-btn-alt">Sign In</button>';
-            signInDiv.onclick = () => window.Clerk.openSignIn({ afterSignInUrl: '/portal.html' });
+            signInDiv.innerHTML = '<button class="nav-btn-alt" onclick="handleSignIn()">Sign In</button>';
           }
           if (portalLink) portalLink.style.display = 'none';
           if (heroAuthCta) heroAuthCta.style.display = 'block';
@@ -172,6 +171,23 @@ async function initClerk() {
     }
   }, 100);
 }
+
+function handleSignIn() {
+  if (window.Clerk && window.Clerk.user === undefined) {
+    // Clerk is present but load() might not be finished
+    showGlobalErr("Authentication is still initializing. Please wait a second...");
+    return;
+  }
+  if (window.Clerk && window.Clerk.openSignIn) {
+    window.Clerk.openSignIn({ mode: 'modal', afterSignInUrl: '/portal.html' });
+  } else if (window.Clerk && window.Clerk.showSignIn) {
+    // Fallback for different SDK versions/configs
+    window.Clerk.showSignIn({ mode: 'modal', afterSignInUrl: '/portal.html' });
+  } else {
+    showGlobalErr("Sign in is unavailable right now. Try refreshing the page.");
+  }
+}
+window.handleSignIn = handleSignIn;
 
 async function loadPaystackKey() {
   try {
@@ -226,7 +242,7 @@ function renderWidget() {
           <div style="font-size:3rem;margin-bottom:20px">🔐</div>
           <h3 style="font-family:'EB Garamond',serif;font-size:1.4rem;margin-bottom:12px">Sign in to Submit Your Work</h3>
           <p style="color:#64748b;margin-bottom:24px;font-size:0.95rem;line-height:1.6">To ensure your reviews are saved and accessible to you, we require a quick sign-in via Google.</p>
-          <button class="btn-w" onclick="window.Clerk.openSignIn({ mode: 'modal' })">Sign In / Create Account</button>
+          <button class="btn-w" onclick="handleSignIn()">Sign In / Create Account</button>
         </div>
       `;
     }
