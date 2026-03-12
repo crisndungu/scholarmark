@@ -274,7 +274,10 @@ async function toPayment() {
     S.files.forEach(f => form.append("files", f));
     const res = await fetch(`${API_BASE}/api/submission`, { method: "POST", body: form, credentials: "include" });
     const data = await res.json();
-    if (!res.ok || !data.success) return showErr(data.error || "Upload failed. Please try again.");
+    if (!res.ok || !data.success) {
+      console.error("[Submission] Details:", data.details);
+      return showErr(data.error || "Upload failed. Please try again.");
+    }
     S.submissionId = data.submissionId;
     S.step = "payment"; renderWidget();
   } catch (e) { console.error("[Submission] Error:", e); showErr("Network error. Please check your connection."); }

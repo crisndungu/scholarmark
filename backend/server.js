@@ -211,8 +211,11 @@ app.post("/api/submission", submissionLimiter, upload.array("files", 10), async 
     console.log(`[Submission] Created ${submissionId} — ${level} — ${priceData.formatted}`);
     res.json({ success: true, submissionId, price: priceData, currency: useCurrency });
   } catch (err) {
-    console.error("[Submission]", err);
-    res.status(500).json({ error: "Submission failed. Please try again." });
+    console.error("[Submission] ERROR:", err);
+    res.status(500).json({
+      error: "Submission failed. Please try again.",
+      details: err.message
+    });
   }
 });
 
